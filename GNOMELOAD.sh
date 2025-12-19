@@ -12,9 +12,9 @@ parted $CURRENTDISK set 1 boot on
 parted $CURRENTDISK mkpart primary 512MiB 100%
 mkfs.fat -F32 ${CURRENTDISK}1
 mkfs.ext4 ${CURRENTDISK}2
-mount ${disk}2 /mnt
+mount ${CURRENTDISK}2 /mnt
 mkdir /mnt/boot
-mount ${disk}1 /mnt/boot
+mount ${CURRENTDISK}1 /mnt/boot
 pacman -S systemd
 echo THEN PACSTRAP LOAD SYSTEM ROOT [/]
 pacstrap /mnt base linux linux-firmware networkmanager nano
