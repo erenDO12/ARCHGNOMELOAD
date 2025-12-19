@@ -38,6 +38,7 @@ pacman -S gnome gdm plymouth
 systemctl enable gdm
 systemctl enable NetworkManager
 unzip GNOMEBOOT.zip
+cp -r gnomeboot /usr/share/plymouth/themes/
 sudo plymouth-set-default-theme -R gnomeboot
 mkinitpcio -P
 umount -R /mnt
