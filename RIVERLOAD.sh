@@ -1,7 +1,14 @@
 #!/bin/bash
-
+clear
 TITLE="Arch Enlightenment Installer"
 LOGFILE="install.log"
+
+# Kullanıcıdan onay al
+if ! whiptail --title "$TITLE" --yesno "Kuruluma başlamak istiyor musunuz?" 10 60; then
+  clear
+  echo "Kurulum iptal edildi."
+  exit 1
+fi
 
 # Başlangıç temizliği
 umount -R /mnt 2>/dev/null
@@ -75,7 +82,6 @@ options root=UUID=$(blkid -s UUID -o value $ROOTPART) rw quiet splash
 EOL
 
 systemctl enable NetworkManager
-systemctl start NetworkManager
 systemctl enable lightdm
 
 echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
@@ -91,3 +97,8 @@ echo 100; echo "Kurulum tamamlandı!"
 umount -R /mnt
 whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Enlightenment hazır.\nLog: $LOGFILE" 10 60
 clear
+
+# Yeniden başlatma onayı
+if whiptail --yesno "Kurulum tamamlandı! Sistemi yeniden başlatmak ister misiniz?" 10 60; then
+  reboot
+fi
