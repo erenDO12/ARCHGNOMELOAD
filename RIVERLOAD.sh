@@ -4,101 +4,81 @@ set -euo pipefail
 TITLE="Arch Kurulum Sihirbazı"
 LOGFILE="/root/install.log"
 
+# Renk tanımları
+RED=$(tput setaf 1)
+GREEN=$(tput setaf 2)
+YELLOW=$(tput setaf 3)
+BLUE=$(tput setaf 4)
+RESET=$(tput sgr0)
+
+clear
+echo "${BLUE}"
+echo "###############################################"
+echo "#                                             #"
+echo "#        $TITLE                               #"
+echo "#                                             #"
+echo "###############################################"
+echo "${RESET}"
+
 # Disk seçimi
-DISK_LIST=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1" "$2}')
-ROOTPART=$(yad --list --radiolist \
-  --title="Disk Seçimi" \
-  --width=600 --height=400 \
-  --column "Seç" --column "Disk" --column "Boyut" \
-  $(for d in $DISK_LIST; do echo "FALSE $d"; done) \
-  --separator=" " \
-)
+echo -e "${YELLOW}Mevcut Diskler:${RESET}"
+lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1" "$2}'
+read -p "Kullanılacak disk (örn: /dev/sda): " ROOTPART
 
 # Locale seçimi
+echo -e "${YELLOW}Locale Seçimi:${RESET}"
 LOCALE_LIST=$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1}')
 if [[ -z "$LOCALE_LIST" ]]; then
   LOCALE_LIST="en_US.UTF-8 tr_TR.UTF-8"
 fi
-LOCALE=$(yad --list --radiolist \
-  --title="Dil ve Locale Seçimi" \
-  --width=600 --height=400 \
-  --column "Seç" --column "Locale" \
-  $(for l in $LOCALE_LIST; do echo "FALSE $l"; done) \
-  --separator=" " \
-)
+echo "$LOCALE_LIST"
+read -p "Locale seçin: " LOCALE
 
 # Klavye seçimi
-KEYMAP=$(localectl list-keymaps | yad --list --radiolist \
-  --title="Klavye Düzeni" \
-  --width=600 --height=400 \
-  --column "Seç" --column "Keymap" \
-  $(while read k; do echo "FALSE $k"; done) \
-  --separator=" " \
-)
+echo -e "${YELLOW}Klavye Düzeni:${RESET}"
+read -p "Keymap (örn: trq, us): " KEYMAP
 
 # Timezone seçimi
-TIMEZONE_LIST=$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||')
-TIMEZONE=$(yad --list --radiolist \
-  --title="Zaman Dilimi" \
-  --width=600 --height=400 \
-  --column "Seç" --column "Timezone" \
-  $(for t in $TIMEZONE_LIST; do echo "FALSE $t"; done) \
-  --separator=" " \
-)
+echo -e "${YELLOW}Zaman Dilimi:${RESET}"
+read -p "Timezone (örn: Europe/Istanbul): " TIMEZONE
 
 # Hostname
-HOSTNAME=$(yad --entry --title="Hostname" --text="Hostname girin:" --entry-text="archlinux")
+read -p "Hostname: " HOSTNAME
 
 # Kullanıcı bilgileri
-NEWUSER=$(yad --entry --title="Yeni Kullanıcı" --text="Yeni kullanıcı adı:" --entry-text="user")
-USERPASS=$(yad --entry --hide-text --title="Kullanıcı Şifresi" --text="Şifre girin:")
-ROOTPASS=$(yad --entry --hide-text --title="Root Şifresi" --text="Şifre girin:")
+read -p "Yeni kullanıcı adı: " NEWUSER
+read -sp "Kullanıcı şifresi: " USERPASS
+echo
+read -sp "Root şifresi: " ROOTPASS
+echo
 
 # Ağ tipi seçimi
-NETTYPE=$(yad --list --radiolist \
-  --title="Ağ Yapılandırması" \
-  --width=400 --height=200 \
-  --column "Seç" --column "Tip" \
-  FALSE dhcp FALSE static FALSE wifi \
-  --separator=" " \
-)
+echo -e "${YELLOW}Ağ Tipi (dhcp/static/wifi):${RESET}"
+read -p "Seçiminiz: " NETTYPE
 
 # Masaüstü seçimi
-DESKTOP=$(yad --list --radiolist \
-  --title="Masaüstü Ortamı" \
-  --width=400 --height=200 \
-  --column "Seç" --column "Desktop" \
-  FALSE hyprland FALSE enlightenment FALSE gnome FALSE kde \
-  --separator=" " \
-)
+echo -e "${YELLOW}Masaüstü Ortamı (gnome/kde/hyprland/enlightenment):${RESET}"
+read -p "Seçiminiz: " DESKTOP
 
 # Display Manager seçimi
-DM_ENABLE=$(yad --list --radiolist \
-  --title="Display Manager" \
-  --width=400 --height=200 \
-  --column "Seç" --column "DM Komutu" --column "Açıklama" \
-  FALSE "systemctl enable gdm" "GNOME Display Manager" \
-  FALSE "systemctl enable sddm" "Simple Desktop Display Manager" \
-  FALSE "systemctl enable lightdm" "LightDM" \
-  FALSE "none" "Yok" \
-  --separator=" " \
-)
+echo -e "${YELLOW}Display Manager (gdm/sddm/lightdm/none):${RESET}"
+read -p "Seçiminiz: " DM_ENABLE
 
-# İlerleme çubuğu
-yad --progress --title="Kurulum" --text="Kurulum devam ediyor..." --percentage=0 &
-PROGRESS_PID=$!
-sleep 2
-echo "20" | tee /proc/$PROGRESS_PID/fd/0
-sleep 2
-echo "50" | tee /proc/$PROGRESS_PID/fd/0
-sleep 2
-echo "100" | tee /proc/$PROGRESS_PID/fd/0
-wait $PROGRESS_PID
+# İlerleme çubuğu (ASCII bar)
+echo -e "${GREEN}Kurulum devam ediyor...${RESET}"
+for i in $(seq 1 100); do
+  BAR=$(printf "%-${i}s" "#" )
+  echo -ne "[${BAR// /#}] ${i}%%\r"
+  sleep 0.05
+done
+echo
 
 # Tamamlandı mesajı
-yad --info --title="$TITLE" --text="Kurulum tamamlandı! Arch Linux hazır.\nLog: $LOGFILE"
+echo -e "${BLUE}Kurulum tamamlandı! Arch Linux hazır.${RESET}"
+echo "Log: $LOGFILE"
 
 # Yeniden başlatma sorusu
-if yad --question --title="Yeniden Başlat" --text="Sistemi yeniden başlatmak ister misiniz?"; then
+read -p "Yeniden başlatmak ister misiniz? (y/n): " REBOOT
+if [[ "$REBOOT" == "y" ]]; then
   reboot
 fi
