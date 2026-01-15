@@ -14,10 +14,10 @@ entry=black,white
 title=black,white
 '
 
-# Disk seçimi
-DISK=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1" "$1"("$2")"}')
+# Disk seçimi (lsblk ile mevcut diskleri listele)
+DISK_LIST=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1" "$2}')
 ROOTPART=$(whiptail --title "Disk Seçimi" --menu "Root partition seçin:" 25 80 15 \
-$DISK \
+$DISK_LIST \
 3>&1 1>&2 2>&3)
 
 # Locale seçimi
@@ -35,8 +35,9 @@ $(localectl list-keymaps | awk '{print $1" "$1}') \
 3>&1 1>&2 2>&3)
 
 # Timezone seçimi
+TIMEZONE_LIST=$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||')
 TIMEZONE=$(whiptail --title "Zaman Dilimi" --menu "Bir timezone seçin:" 25 80 15 \
-$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||' | awk '{print $1" "$1}') \
+$(for t in $TIMEZONE_LIST; do echo "$t $t"; done) \
 3>&1 1>&2 2>&3)
 
 # Hostname
@@ -93,7 +94,7 @@ DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 
   "systemctl enable gdm" "GNOME Display Manager" \
   "systemctl enable sddm" "Simple Desktop Display Manager" \
   "systemctl enable lightdm" "LightDM" \
-  true "Yok" \
+  "none" "Yok" \
   3>&1 1>&2 2>&3)
 
 # --- Chroot işlemleri ve ilerleme ---
@@ -103,9 +104,14 @@ arch-chroot /mnt bootctl install
 ) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
 
 umount -R /mnt || true
-whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux hazır.\nLog: $LOGFILE" 10 70
-clear
 
+# Kurulum tamamlandı mesajı
+whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux hazır.\nLog: $LOGFILE" 10 70
+
+# Yeniden başlatma sorusu
 if whiptail --yesno "Sistemi yeniden başlatmak ister misiniz?" 10 60; then
   reboot
 fi
+
+# Ekranı temizle (en sona alındı)
+clear
