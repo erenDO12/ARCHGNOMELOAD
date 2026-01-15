@@ -1,17 +1,19 @@
 #!/bin/bash
-
+echo GET PACKAGE GRAPH
+pacman -S --noconfirm ncurses
 TITLE="Arch River Installer"
 
 # Disk seçimi
 DISK=$(lsblk -dpno NAME | grep -E "/dev/sd|/dev/nvme" | \
-  zenity --list --title="Disk Seçimi" --column="Diskler" --height=300 --width=400)
+  dialog --stdout --menu "Hedef Disk Seçin:" 20 60 10)
 
 # Kullanıcı bilgileri
-NEWUSER=$(zenity --entry --title="Yeni Kullanıcı" --text="Kullanıcı adı girin:")
-USERPASS=$(zenity --password --title="Kullanıcı Şifresi")
-ROOTPASS=$(zenity --password --title="Root Şifresi")
+NEWUSER=$(dialog --stdout --inputbox "Yeni kullanıcı adı:" 10 50)
+USERPASS=$(dialog --stdout --passwordbox "Kullanıcı şifresi:" 10 50)
+ROOTPASS=$(dialog --stdout --passwordbox "Root şifresi:" 10 50)
 
-zenity --info --title="Özet" --text="Disk: $DISK\nKullanıcı: $NEWUSER"
+# Özet ekranı
+dialog --msgbox "Disk: $DISK\nKullanıcı: $NEWUSER" 10 50
 
 # Partitioning
 parted $DISK mklabel gpt
@@ -25,7 +27,7 @@ ROOTPART=$(ls ${DISK}* | grep -E "${DISK}p?2$")
 mkfs.fat -F32 $BOOTPART
 mkfs.ext4 $ROOTPART
 
-# Mount işlemleri
+# Mount işlemleri artık /mnt altında
 mount $ROOTPART /mnt
 mkdir /mnt/boot
 mount $BOOTPART /mnt/boot
@@ -79,4 +81,5 @@ EOL
 EOF
 
 umount -R /mnt
-zenity --info --title="Kurulum Tamamlandı" --text="Arch River başarıyla kuruldu!"
+dialog --msgbox "Kurulum tamamlandı! Arch River hazır." 10 50
+clear
