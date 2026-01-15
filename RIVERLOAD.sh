@@ -1,5 +1,5 @@
 #!/bin/bash
-clear
+
 TITLE="Arch Enlightenment Installer"
 LOGFILE="install.log"
 
@@ -89,6 +89,23 @@ echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
 useradd -m -G wheel -s /bin/bash $NEWUSER
 echo "$NEWUSER:$USERPASS" | chpasswd
 echo "root:$ROOTPASS" | chpasswd
+
+# Enlightenment shelf içine Network Manager gadget ekleme
+mkdir -p /home/$NEWUSER/.e
+cat <<EOL > /home/$NEWUSER/.e/e.src
+group "shelves" struct {
+  group "shelf" struct {
+    value "name" string: "default";
+    value "style" string: "default";
+    group "contents" list {
+      group "item" struct {
+        value "name" string: "Network";
+      }
+    }
+  }
+}
+EOL
+chown -R $NEWUSER:$NEWUSER /home/$NEWUSER/.e
 EOF
 
 echo 100; echo "Kurulum tamamlandı!"
