@@ -34,6 +34,12 @@ NETTYPE=$(whiptail --title "Ağ Yapılandırması" --menu "Bir ağ tipi seçin:"
   "wifi" "Kablosuz Bağlantı" \
   3>&1 1>&2 2>&3)
 
+# Ağ arayüzü seçimi
+INTERFACES=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo)
+IFACE=$(whiptail --title "Ağ Arayüzü Seçimi" --menu "Bir ağ arayüzü seçin:" 20 70 10 \
+$(for i in $INTERFACES; do echo "$i $i"; done) \
+3>&1 1>&2 2>&3)
+
 if [[ "$NETTYPE" == "static" ]]; then
   IPADDR=$(whiptail --inputbox "IP adresi:" 10 60 "192.168.1.100" 3>&1 1>&2 2>&3)
   GATEWAY=$(whiptail --inputbox "Gateway:" 10 60 "192.168.1.1" 3>&1 1>&2 2>&3)
@@ -63,13 +69,11 @@ DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 
 
 # --- Chroot işlemleri ---
 (
-echo 25; echo "Chroot işlemleri başlıyor..."
+echo 5; echo "Bootloader kuruluyor..."
+arch-chroot /mnt bootctl install
+
+echo 15; echo "Locale ayarlanıyor..."
 arch-chroot /mnt bash -c "
-set -euo pipefail
-
-bootctl install
-
-# Locale
 if grep -q \"^#${LOCALE}\" /etc/locale.gen; then
   sed -i \"s/^#${LOCALE}/${LOCALE}/\" /etc/locale.gen
 elif ! grep -q \"^${LOCALE}\" /etc/locale.gen; then
@@ -77,99 +81,90 @@ elif ! grep -q \"^${LOCALE}\" /etc/locale.gen; then
 fi
 echo \"LANG=${LOCALE}\" > /etc/locale.conf
 locale-gen
+"
 
-# Hostname
-echo \"${HOSTNAME}\" > /etc/hostname
+echo 25; echo "Hostname ayarlanıyor..."
+echo "${HOSTNAME}" | arch-chroot /mnt tee /etc/hostname
 
-# Timezone
-ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
-hwclock --systohc
+echo 35; echo "Timezone ayarlanıyor..."
+arch-chroot /mnt ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
+arch-chroot /mnt hwclock --systohc
 
-# Keyboard
-echo \"KEYMAP=${KEYMAP}\" > /etc/vconsole.conf
-localectl set-x11-keymap ${KEYMAP}
+echo 45; echo "Klavye ayarlanıyor..."
+echo "KEYMAP=${KEYMAP}" | arch-chroot /mnt tee /etc/vconsole.conf
+arch-chroot /mnt localectl set-x11-keymap ${KEYMAP}
 
-# Bootloader
-cat > /boot/loader/loader.conf <<EOL
+echo 55; echo "Bootloader yapılandırılıyor..."
+ROOTUUID=$(blkid -s UUID -o value ${ROOTPART})
+arch-chroot /mnt bash -c "cat > /boot/loader/loader.conf <<EOL
 default arch
 timeout 3
 console-mode keep
 editor no
-EOL
-
-ROOTUUID=\$(blkid -s UUID -o value ${ROOTPART})
-cat > /boot/loader/entries/arch.conf <<EOL
+EOL"
+arch-chroot /mnt bash -c "cat > /boot/loader/entries/arch.conf <<EOL
 title   Arch Linux
 linux   /vmlinuz-linux
 initrd  /initramfs-linux.img
-options root=UUID=\${ROOTUUID} rw quiet splash
-EOL
+options root=UUID=${ROOTUUID} rw quiet splash
+EOL"
 
-# Ağ yapılandırması
-if [[ \"${NETTYPE}\" == \"dhcp\" ]]; then
-  systemctl enable NetworkManager
+echo 65; echo "Ağ yapılandırması yapılıyor..."
+if [[ "$NETTYPE" == "dhcp" ]]; then
+  arch-chroot /mnt systemctl enable NetworkManager
 fi
-
-if [[ \"${NETTYPE}\" == \"static\" ]]; then
-  mkdir -p /etc/systemd/network
-  cat > /etc/systemd/network/20-wired.network <<EOL
+if [[ "$NETTYPE" == "static" ]]; then
+  arch-chroot /mnt bash -c "mkdir -p /etc/systemd/network && cat > /etc/systemd/network/20-wired.network <<EOL
 [Match]
-Name=en*
+Name=${IFACE}
 [Network]
 Address=${IPADDR}/24
 Gateway=${GATEWAY}
 DNS=${DNS}
-EOL
-  systemctl enable systemd-networkd
-  systemctl enable systemd-resolved
+EOL"
+  arch-chroot /mnt systemctl enable systemd-networkd
+  arch-chroot /mnt systemctl enable systemd-resolved
+fi
+if [[ "$NETTYPE" == "wifi" ]]; then
+  arch-chroot /mnt systemctl enable NetworkManager
+  arch-chroot /mnt nmcli dev wifi connect "${SSID}" password "${WIFIPASS}" ifname "${IFACE}" || true
 fi
 
-if [[ \"${NETTYPE}\" == \"wifi\" ]]; then
-  systemctl enable NetworkManager
-  nmcli dev wifi connect \"${SSID}\" password \"${WIFIPASS}\" || true
-fi
+echo 75; echo "Display Manager kuruluyor..."
+arch-chroot /mnt bash -c "${DM_ENABLE}"
 
-# Display manager
-${DM_ENABLE}
-
-# Hyprland greetd ayarı
-if [[ \"${DESKTOP}\" == \"hyprland\" ]]; then
-  pacman -Sy --noconfirm tuigreet
-  mkdir -p /etc/greetd
-  cat > /etc/greetd/config.toml <<EOL
+echo 85; echo "Masaüstü ortamı ayarlanıyor..."
+if [[ "${DESKTOP}" == "hyprland" ]]; then
+  arch-chroot /mnt pacman -Sy --noconfirm tuigreet
+  arch-chroot /mnt bash -c "mkdir -p /etc/greetd && cat > /etc/greetd/config.toml <<EOL
 [terminal]
 vt = 1
 [default_session]
 command = \"tuigreet --time --cmd Hyprland\"
 user = \"greeter\"
-EOL
+EOL"
 fi
-
-# Sudo ve kullanıcı
-echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
-useradd -m -G wheel -s /bin/bash ${NEWUSER}
-echo \"${NEWUSER}:${USERPASS}\" | chpasswd
-echo \"root:${ROOTPASS}\" | chpasswd
-
-# Enlightenment özel ayar
-if [[ \"${DESKTOP}\" == \"enlightenment\" ]]; then
-  mkdir -p /home/${NEWUSER}/.e
-  cat > /home/${NEWUSER}/.e/e.src <<EOL
+if [[ "${DESKTOP}" == "enlightenment" ]]; then
+  arch-chroot /mnt bash -c "mkdir -p /home/${NEWUSER}/.e && cat > /home/${NEWUSER}/.e/e.src <<EOL
 group \"shelves\" struct {
   group \"shelf\" struct {
     value \"name\" string: \"default\";
     value \"style\" string: \"default\";
     group \"contents\" list {
       group \"item\" struct {
-        value \"name\" string: \"Network\";
-      }
-    }
+        value \"     }
   }
 }
-EOL
-  chown -R ${NEWUSER}:${NEWUSER} /home/${NEWUSER}/.e
+EOL"
+  arch-chroot /mnt chown -R ${NEWUSER}:${NEWUSER} /home/${NEWUSER}/.e
 fi
-"
+
+echo 95; echo "Kullanıcı ve sudo ayarlanıyor..."
+arch-chroot /mnt bash -c "echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers"
+arch-chroot /mnt useradd -m -G wheel -s /bin/bash ${NEWUSER}
+echo "${NEWUSER}:${USERPASS}" | arch-chroot /mnt chpasswd
+echo "root:${ROOTPASS}" | arch-chroot /mnt chpasswd
+
 echo 100; echo "Kurulum tamamlandı!"
 ) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
 
