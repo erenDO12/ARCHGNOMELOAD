@@ -1,139 +1,69 @@
 #!/bin/bash
 set -euo pipefail
 
-TITLE="Arch Desktop Installer"
-LOGFILE="install.log"
+TITLE="Arch Kurulum Sihirbazı"
+LOGFILE="/root/install.log"
 
-# Root kontrolü
-if [[ $EUID -ne 0 ]]; then
-  echo "Bu script root olarak çalıştırılmalıdır."
-  exit 1
+# --- Locale seçimi (tam liste) ---
+LOCALE=$(whiptail --title "Dil ve Locale Seçimi" --menu "Bir locale seçin:" 25 80 15 \
+$(grep -E "^[a-z]" /usr/share/i18n/SUPPORTED | awk '{print $1 " \"" $1 "\""}') \
+3>&1 1>&2 2>&3)
+
+# --- Klavye seçimi (tam liste) ---
+KEYMAP=$(whiptail --title "Klavye Düzeni" --menu "Bir klavye seçin:" 25 80 15 \
+$(localectl list-keymaps | awk '{print $1 " \"" $1 "\""}') \
+3>&1 1>&2 2>&3)
+
+# --- Timezone seçimi (tam liste) ---
+TIMEZONE=$(whiptail --title "Zaman Dilimi" --menu "Bir timezone seçin:" 25 80 15 \
+$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||' | awk '{print $1 " \"" $1 "\""}') \
+3>&1 1>&2 2>&3)
+
+# Hostname
+HOSTNAME=$(whiptail --inputbox "Hostname girin:" 10 60 "archlinux" 3>&1 1>&2 2>&3)
+
+# Kullanıcı bilgileri
+NEWUSER=$(whiptail --inputbox "Yeni kullanıcı adı:" 10 60 "user" 3>&1 1>&2 2>&3)
+USERPASS=$(whiptail --passwordbox "Yeni kullanıcı için şifre:" 10 60 3>&1 1>&2 2>&3)
+ROOTPASS=$(whiptail --passwordbox "Root için şifre:" 10 60 3>&1 1>&2 2>&3)
+
+# Ağ tipi seçimi
+NETTYPE=$(whiptail --title "Ağ Yapılandırması" --menu "Bir ağ tipi seçin:" 20 70 10 \
+  "dhcp" "DHCP (otomatik)" \
+  "static" "Statik IP" \
+  "wifi" "Kablosuz Bağlantı" \
+  3>&1 1>&2 2>&3)
+
+if [[ "$NETTYPE" == "static" ]]; then
+  IPADDR=$(whiptail --inputbox "IP adresi:" 10 60 "192.168.1.100" 3>&1 1>&2 2>&3)
+  GATEWAY=$(whiptail --inputbox "Gateway:" 10 60 "192.168.1.1" 3>&1 1>&2 2>&3)
+  DNS=$(whiptail --inputbox "DNS:" 10 60 "8.8.8.8" 3>&1 1>&2 2>&3)
 fi
 
-if ! command -v whiptail >/dev/null 2>&1; then
-  echo "whiptail yüklü değil. 'pacman -Sy --noconfirm libnewt' ile yükleyin."
-  exit 1
+if [[ "$NETTYPE" == "wifi" ]]; then
+  SSID=$(whiptail --inputbox "WiFi SSID:" 10 60 3>&1 1>&2 2>&3)
+  WIFIPASS=$(whiptail --passwordbox "WiFi Şifresi:" 10 60 3>&1 1>&2 2>&3)
 fi
 
-if ! whiptail --title "$TITLE" --yesno "Kuruluma başlamak istiyor musunuz?" 10 60; then
-  clear; echo "Kurulum iptal edildi."; exit 1
-fi
+# Masaüstü seçimi
+DESKTOP=$(whiptail --title "Masaüstü Ortamı" --menu "Bir masaüstü seçin:" 20 70 10 \
+  "hyprland" "Hyprland" \
+  "enlightenment" "Enlightenment" \
+  "gnome" "GNOME" \
+  "kde" "KDE Plasma" \
+  3>&1 1>&2 2>&3)
 
-umount -R /mnt 2>/dev/null || true
-mkdir -p /mnt
+# Display Manager seçimi
+DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 \
+  "systemctl enable gdm" "GNOME Display Manager" \
+  "systemctl enable sddm" "Simple Desktop Display Manager" \
+  "systemctl enable lightdm" "LightDM" \
+  "true" "Yok" \
+  3>&1 1>&2 2>&3)
 
+# --- Chroot işlemleri ---
 (
-echo 5; echo "Disk seçimi..."
-DISKS=$(lsblk -dpno NAME | grep -E "/dev/sd|/dev/nvme|/dev/vda")
-MENU_OPTS=()
-for d in $DISKS; do MENU_OPTS+=("$d" "$(lsblk -dnpo SIZE "$d")"); done
-DISK=$(whiptail --title "$TITLE" --menu "Hedef Disk Seçin (TÜM VERİLER SİLİNECEK):" 20 70 10 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
-
-NEWUSER=$(whiptail --title "$TITLE" --inputbox "Yeni kullanıcı adı:" 10 60 3>&1 1>&2 2>&3)
-USERPASS=$(whiptail --title "$TITLE" --passwordbox "Kullanıcı şifresi:" 10 60 3>&1 1>&2 2>&3)
-ROOTPASS=$(whiptail --title "$TITLE" --passwordbox "Root şifresi:" 10 60 3>&1 1>&2 2>&3)
-
-LOCALE=$(whiptail --title "$TITLE" --menu "Dil/Locale Seçin:" 20 70 10 \
-"tr_TR.UTF-8" "Türkçe" \
-"en_US.UTF-8" "English (US)" \
-"de_DE.UTF-8" "Deutsch" \
-"fr_FR.UTF-8" "Français" \
-3>&1 1>&2 2>&3)
-
-KEYMAP=$(whiptail --title "$TITLE" --menu "Klavye Düzeni Seçin:" 20 70 10 \
-"trq" "Türkçe Q" \
-"trk" "Türkçe F" \
-"us" "US QWERTY" \
-"de" "German" \
-"fr" "French" \
-3>&1 1>&2 2>&3)
-
-TIMEZONE=$(whiptail --title "$TITLE" --menu "Zaman Dilimi Seçin:" 20 70 10 \
-"Europe/Istanbul" "Türkiye" \
-"Europe/Berlin" "Almanya" \
-"Europe/London" "İngiltere" \
-"America/New_York" "ABD (NY)" \
-"Asia/Tokyo" "Japonya" \
-3>&1 1>&2 2>&3)
-
-HOSTNAME=$(whiptail --title "$TITLE" --inputbox "Hostname (Bilgisayar adı):" 10 60 3>&1 1>&2 2>&3)
-
-NETTYPE=$(whiptail --title "$TITLE" --menu "Ağ Tipi Seçin:" 20 70 10 \
-"dhcp" "Otomatik (DHCP)" \
-"static" "Statik IP" \
-"wifi" "Kablosuz (Wi-Fi)" \
-3>&1 1>&2 2>&3)
-
-if [ "$NETTYPE" = "static" ]; then
-  IPADDR=$(whiptail --title "$TITLE" --inputbox "IP Adresi:" 10 60 3>&1 1>&2 2>&3)
-  NETMASK=$(whiptail --title "$TITLE" --inputbox "Ağ Maskesi:" 10 60 3>&1 1>&2 2>&3)
-  GATEWAY=$(whiptail --title "$TITLE" --inputbox "Gateway:" 10 60 3>&1 1>&2 2>&3)
-  DNS=$(whiptail --title "$TITLE" --inputbox "DNS:" 10 60 3>&1 1>&2 2>&3)
-fi
-
-if [ "$NETTYPE" = "wifi" ]; then
-  SSID=$(whiptail --title "$TITLE" --inputbox "Wi-Fi SSID:" 10 60 3>&1 1>&2 2>&3)
-  WIFIPASS=$(whiptail --title "$TITLE" --passwordbox "Wi-Fi Şifresi:" 10 60 3>&1 1>&2 2>&3)
-fi
-
-DESKTOP=$(whiptail --title "$TITLE" --menu "Masaüstü Ortamı Seçin:" 20 70 12 \
-"enlightenment" "Enlightenment" \
-"hyprland" "Hyprland (Wayland)" \
-"gnome" "GNOME" \
-"kde" "KDE Plasma" \
-"xfce" "XFCE" \
-"lxqt" "LXQt" \
-3>&1 1>&2 2>&3)
-
-EXTRAPKGS=$(whiptail --title "$TITLE" --checklist "Ek paketleri seçin:" 20 70 10 \
-"firefox" "Web tarayıcı (Firefox)" ON \
-"chromium" "Web tarayıcı (Chromium)" OFF \
-"libreoffice-fresh" "Ofis paketi" ON \
-"vlc" "Medya oynatıcı" ON \
-"gimp" "Resim düzenleyici" OFF \
-"cups" "Yazıcı desteği" OFF \
-"base-devel" "Derleme araçları" ON \
-"flatpak" "Flatpak desteği" OFF \
-"pipewire" "Ses sistemi" ON \
-3>&1 1>&2 2>&3)
-EXTRAPKGS=$(echo $EXTRAPKGS | sed 's/"//g')
-
-echo 15; echo "Disk bölümlendirme..."
-parted -s "$DISK" mklabel gpt >>"$LOGFILE" 2>&1
-parted -s "$DISK" mkpart ESP fat32 1MiB 512MiB >>"$LOGFILE" 2>&1
-parted -s "$DISK" set 1 boot on >>"$LOGFILE" 2>&1
-parted -s "$DISK" mkpart primary 512MiB 100% >>"$LOGFILE" 2>&1
-
-BOOTPART=$(ls "${DISK}"* | grep -E "${DISK}p?1$")
-ROOTPART=$(ls "${DISK}"* | grep -E "${DISK}p?2$")
-
-mkfs.fat -F32 "$BOOTPART" >>"$LOGFILE" 2>&1
-mkfs.ext4 -F "$ROOTPART" >>"$LOGFILE" 2>&1
-
-echo 25; echo "Disk mount ediliyor..."
-mount "$ROOTPART" /mnt
-mkdir -p /mnt/boot
-mount "$BOOTPART" /mnt/boot
-
-echo 40; echo "Mirror listesi güncelleniyor..."
-pacman -Sy --noconfirm >>"$LOGFILE" 2>&1
-
-case "$DESKTOP" in
-  enlightenment) DESKTOP_PKGS="enlightenment lightdm lightdm-gtk-greeter"; DM_ENABLE="systemctl enable lightdm";;
-  hyprland) DESKTOP_PKGS="hyprland xorg-xwayland waybar rofi alacritty greetd"; DM_ENABLE="systemctl enable greetd";;
-  gnome) DESKTOP_PKGS="gnome gdm"; DM_ENABLE="systemctl enable gdm";;
-  kde) DESKTOP_PKGS="plasma kde-applications sddm"; DM_ENABLE="systemctl enable sddm";;
-  xfce) DESKTOP_PKGS="xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_ENABLE="systemctl enable lightdm";;
-  lxqt) DESKTOP_PKGS="lxqt lightdm lightdm-gtk-greeter"; DM_ENABLE="systemctl enable lightdm";;
-esac
-
-echo 55; echo "Temel sistem kuruluyor..."
-pacstrap /mnt base linux linux-firmware $DESKTOP_PKGS $EXTRAPKGS nano sudo vim git unzip plymouth systemd networkmanager network-manager-applet >>"$LOGFILE" 2>&1
-
-echo 70; echo "fstab oluşturuluyor..."
-genfstab -U /mnt >> /mnt/etc/fstab
-
-echo 85; echo "Chroot işlemleri ve yapılandırma..."
+echo 25; echo "Chroot işlemleri başlıyor..."
 arch-chroot /mnt bash -c "
 set -euo pipefail
 
@@ -240,7 +170,6 @@ EOL
   chown -R ${NEWUSER}:${NEWUSER} /home/${NEWUSER}/.e
 fi
 "
-
 echo 100; echo "Kurulum tamamlandı!"
 ) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
 
