@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TITLE="Arch River Installer"
+TITLE="Arch Enlightenment Installer"
 LOGFILE="install.log"
 
 # Başlangıç temizliği
@@ -43,8 +43,8 @@ pacman -Sy --noconfirm >>$LOGFILE 2>&1
 
 echo 55; echo "Temel sistem kuruluyor..."
 pacstrap /mnt base linux linux-firmware networkmanager nano sudo \
-  river wlroots mesa intel-media-driver \
-  alacritty waybar rofi greetd plymouth unzip git systemd systemd-boot >>$LOGFILE 2>&1
+  enlightenment lightdm lightdm-gtk-greeter \
+  vim git unzip plymouth systemd systemd-boot >>$LOGFILE 2>&1
 
 echo 70; echo "fstab oluşturuluyor..."
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -55,7 +55,7 @@ bootctl install
 sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
 echo 'LANG=en_US.UTF-8' > /etc/locale.conf
 locale-gen
-echo 'arch-river' > /etc/hostname
+echo 'arch-enlightenment' > /etc/hostname
 ln -sf /usr/share/zoneinfo/Europe/Istanbul /etc/localtime
 hwclock --systohc
 
@@ -74,25 +74,18 @@ options root=UUID=$(blkid -s UUID -o value $ROOTPART) rw quiet splash
 EOL
 
 systemctl enable NetworkManager
-systemctl enable greetd
+systemctl enable lightdm
+
 echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
 
 useradd -m -G wheel -s /bin/bash $NEWUSER
 echo "$NEWUSER:$USERPASS" | chpasswd
 echo "root:$ROOTPASS" | chpasswd
-
-cat <<EOL > /etc/greetd/config.toml
-[terminal]
-vt = 1
-[default_session]
-command = "river"
-user = "$NEWUSER"
-EOL
 EOF
 
 echo 100; echo "Kurulum tamamlandı!"
 ) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 60 0
 
 umount -R /mnt
-whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch River hazır.\nLog: $LOGFILE" 10 60
+whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Enlightenment hazır.\nLog: $LOGFILE" 10 60
 clear
