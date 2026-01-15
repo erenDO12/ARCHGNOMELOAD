@@ -4,26 +4,29 @@ set -euo pipefail
 TITLE="Arch Kurulum Sihirbazı"
 LOGFILE="/root/install.log"
 
-# Tema ayarı (beyaz yazı, siyah arka plan)
+# Tema ayarı: installer beyaz arka plan, border siyah arka plan
 export NEWT_COLORS='
-root=white,black
+root=black,white
 border=white,black
-textbox=white,black
+textbox=black,white
 button=black,white
-entry=white,black
-title=white,black
+entry=black,white
+title=black,white
 '
 
-# Diskleri listele ve seçim yaptır
+# Disk seçimi
 DISK=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1 " \"" $1 " (" $2 ")\""}')
-
 ROOTPART=$(whiptail --title "Disk Seçimi" --menu "Root partition seçin:" 25 80 15 \
 $DISK \
 3>&1 1>&2 2>&3)
 
 # Locale seçimi
+LOCALE_LIST=$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1 " \"" $1 "\""}')
+if [[ -z "$LOCALE_LIST" ]]; then
+  LOCALE_LIST="en_US.UTF-8 \"English (US)\" tr_TR.UTF-8 \"Türkçe\""
+fi
 LOCALE=$(whiptail --title "Dil ve Locale Seçimi" --menu "Bir locale seçin:" 25 80 15 \
-$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1 " \"" $1 "\""}') \
+$LOCALE_LIST \
 3>&1 1>&2 2>&3)
 
 # Klavye seçimi
@@ -51,7 +54,7 @@ NETTYPE=$(whiptail --title "Ağ Yapılandırması" --menu "Bir ağ tipi seçin:"
   "wifi" "Kablosuz Bağlantı" \
   3>&1 1>&2 2>&3)
 
-# Ağ arayüzü ve WiFi SSID seçimi
+# Ağ arayüzü seçimi
 if [[ "$NETTYPE" == "wifi" ]]; then
   INTERFACES=$(ls /sys/class/net | grep -E '^wl')
   IFACE=$(whiptail --title "WiFi Arayüzü Seçimi" --menu "Bir WiFi arayüzü seçin:" 20 70 10 \
@@ -97,9 +100,6 @@ DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 
 (
 echo 5; echo "Bootloader kuruluyor..."
 arch-chroot /mnt bootctl install
-
-# ... (senin önceki kurulum adımların burada aynı şekilde devam ediyor)
-# Bu kısımda sadece disk seçimi ve tema değişiklikleri eklendi.
 ) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
 
 umount -R /mnt || true
