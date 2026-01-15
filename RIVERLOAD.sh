@@ -44,13 +44,13 @@ pacman -Sy --noconfirm >>$LOGFILE 2>&1
 echo 55; echo "Temel sistem kuruluyor..."
 pacstrap /mnt base linux linux-firmware networkmanager nano sudo \
   enlightenment lightdm lightdm-gtk-greeter \
-  vim git unzip plymouth systemd systemd-boot >>$LOGFILE 2>&1
+  vim git unzip plymouth systemd >>$LOGFILE 2>&1
 
 echo 70; echo "fstab oluşturuluyor..."
 genfstab -U /mnt >> /mnt/etc/fstab
 
 echo 85; echo "Chroot işlemleri..."
-arch-chroot /mnt /bin/bash <<EOF >>$LOGFILE 2>&1
+arch-chroot /mnt <<EOF >>$LOGFILE 2>&1
 bootctl install
 sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
 echo 'LANG=en_US.UTF-8' > /etc/locale.conf
