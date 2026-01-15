@@ -1,19 +1,23 @@
 #!/bin/bash
-echo GET PACKAGE GRAPH
-pacman -S --noconfirm ncurses
+
 TITLE="Arch River Installer"
 
 # Disk seçimi
-DISK=$(lsblk -dpno NAME | grep -E "/dev/sd|/dev/nvme" | \
-  dialog --stdout --menu "Hedef Disk Seçin:" 20 60 10)
+DISKS=$(lsblk -dpno NAME | grep -E "/dev/sd|/dev/nvme")
+MENU_OPTS=()
+for d in $DISKS; do
+  MENU_OPTS+=("$d" "$d")
+done
+
+DISK=$(whiptail --title "$TITLE" --menu "Hedef Disk Seçin:" 20 60 10 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
 
 # Kullanıcı bilgileri
-NEWUSER=$(dialog --stdout --inputbox "Yeni kullanıcı adı:" 10 50)
-USERPASS=$(dialog --stdout --passwordbox "Kullanıcı şifresi:" 10 50)
-ROOTPASS=$(dialog --stdout --passwordbox "Root şifresi:" 10 50)
+NEWUSER=$(whiptail --title "$TITLE" --inputbox "Yeni kullanıcı adı:" 10 50 3>&1 1>&2 2>&3)
+USERPASS=$(whiptail --title "$TITLE" --passwordbox "Kullanıcı şifresi:" 10 50 3>&1 1>&2 2>&3)
+ROOTPASS=$(whiptail --title "$TITLE" --passwordbox "Root şifresi:" 10 50 3>&1 1>&2 2>&3)
 
 # Özet ekranı
-dialog --msgbox "Disk: $DISK\nKullanıcı: $NEWUSER" 10 50
+whiptail --title "$TITLE" --msgbox "Disk: $DISK\nKullanıcı: $NEWUSER" 10 50
 
 # Partitioning
 parted $DISK mklabel gpt
@@ -27,7 +31,6 @@ ROOTPART=$(ls ${DISK}* | grep -E "${DISK}p?2$")
 mkfs.fat -F32 $BOOTPART
 mkfs.ext4 $ROOTPART
 
-# Mount işlemleri artık /mnt altında
 mount $ROOTPART /mnt
 mkdir /mnt/boot
 mount $BOOTPART /mnt/boot
@@ -81,5 +84,5 @@ EOL
 EOF
 
 umount -R /mnt
-dialog --msgbox "Kurulum tamamlandı! Arch River hazır." 10 50
+whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch River hazır." 10 50
 clear
