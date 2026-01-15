@@ -42,9 +42,10 @@ echo 40; echo "Mirror listesi güncelleniyor..."
 pacman -Sy --noconfirm >>$LOGFILE 2>&1
 
 echo 55; echo "Temel sistem kuruluyor..."
-pacstrap /mnt base linux linux-firmware networkmanager nano sudo \
+pacstrap /mnt base linux linux-firmware nano sudo \
   enlightenment lightdm lightdm-gtk-greeter \
-  vim git unzip plymouth systemd >>$LOGFILE 2>&1
+  vim git unzip plymouth systemd \
+  networkmanager network-manager-applet >>$LOGFILE 2>&1
 
 echo 70; echo "fstab oluşturuluyor..."
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -74,6 +75,7 @@ options root=UUID=$(blkid -s UUID -o value $ROOTPART) rw quiet splash
 EOL
 
 systemctl enable NetworkManager
+systemctl start NetworkManager
 systemctl enable lightdm
 
 echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
