@@ -6,7 +6,7 @@ LOGFILE="/root/kurulum.log"
 (
 echo 10; echo "Dil seçimi yapılıyor..."
 
-# 1. Dil / Locale
+# 1. Dil / Locale (dinamik liste)
 LOCALE=$(whiptail --title "Dil Seçimi" --menu "Kullanmak istediğiniz dili seçin:" 25 80 20 $(locale -a | awk '{print $1 " " $1}') 3>&1 1>&2 2>&3)
 sed -i "s/^#\($LOCALE\)/\1/" /etc/locale.gen
 locale-gen
@@ -14,14 +14,14 @@ echo "LANG=$LOCALE" > /etc/locale.conf
 
 echo 30; echo "Bölge ve zaman dilimi seçiliyor..."
 
-# 2. Bölge / Timezone
+# 2. Bölge / Timezone (dinamik liste)
 TIMEZONE=$(whiptail --title "Zaman Dilimi Seçimi" --menu "Kullanmak istediğiniz zaman dilimini seçin:" 25 80 20 $(timedatectl list-timezones | awk '{print $1 " " $1}') 3>&1 1>&2 2>&3)
 ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
 hwclock --systohc
 
 echo 50; echo "Klavye düzeni seçiliyor..."
 
-# 3. Klavye Düzeni
+# 3. Klavye Düzeni (dinamik liste)
 KEYMAP=$(whiptail --title "Klavye Düzeni Seçimi" --menu "Kullanmak istediğiniz klavye düzenini seçin:" 25 80 20 $(localectl list-keymaps | awk '{print $1 " " $1}') 3>&1 1>&2 2>&3)
 echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
 
@@ -117,7 +117,7 @@ for app in $EXTRA; do
     \"vlc\") pacman -S --noconfirm vlc ;;
     \"libreoffice\") pacman -S --noconfirm libreoffice-fresh ;;
     \"thunderbird\") pacman -S --noconfirm thunderbird ;;
-        \"gimp\") pacman -S --noconfirm gimp ;;
+    \"gimp\") pacman -S --noconfirm gimp ;;
     \"neofetch\") pacman -S --noconfirm neofetch ;;
     \"htop\") pacman -S --noconfirm htop ;;
   esac
@@ -130,9 +130,4 @@ echo 100; echo "Kurulum tamamlandı!"
 # 8. Kurulum Sonrası İşlemler
 # ------------------------------------------------------------
 umount -R /mnt || true
-whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux + $DE hazır.\nSeçilen ek uygulamalar da kuruldu.\nLog: $LOGFILE" 10 60
-clear
-
-if whiptail --yesno "Kurulum tamamlandı! Sistemi yeniden başlatmak ister misiniz?" 10 60; then
-  reboot
-fi
+whiptail --title "$TITLE" --msgbox "Kur
