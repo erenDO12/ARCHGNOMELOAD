@@ -4,15 +4,14 @@ TITLE="Arch River Installer"
 
 # Disk seçimi
 DISK=$(lsblk -dpno NAME | grep -E "/dev/sd|/dev/nvme" | \
-  dialog --stdout --menu "Hedef Disk Seçin:" 20 60 10)
+  zenity --list --title="Disk Seçimi" --column="Diskler" --height=300 --width=400)
 
 # Kullanıcı bilgileri
-NEWUSER=$(dialog --stdout --inputbox "Yeni kullanıcı adı:" 10 50)
-USERPASS=$(dialog --stdout --passwordbox "Kullanıcı şifresi:" 10 50)
-ROOTPASS=$(dialog --stdout --passwordbox "Root şifresi:" 10 50)
+NEWUSER=$(zenity --entry --title="Yeni Kullanıcı" --text="Kullanıcı adı girin:")
+USERPASS=$(zenity --password --title="Kullanıcı Şifresi")
+ROOTPASS=$(zenity --password --title="Root Şifresi")
 
-# Özet ekranı
-dialog --msgbox "Disk: $DISK\nKullanıcı: $NEWUSER" 10 50
+zenity --info --title="Özet" --text="Disk: $DISK\nKullanıcı: $NEWUSER"
 
 # Partitioning
 parted $DISK mklabel gpt
@@ -26,7 +25,7 @@ ROOTPART=$(ls ${DISK}* | grep -E "${DISK}p?2$")
 mkfs.fat -F32 $BOOTPART
 mkfs.ext4 $ROOTPART
 
-# Mount işlemleri artık /mnt altında
+# Mount işlemleri
 mount $ROOTPART /mnt
 mkdir /mnt/boot
 mount $BOOTPART /mnt/boot
@@ -80,5 +79,4 @@ EOL
 EOF
 
 umount -R /mnt
-dialog --msgbox "Kurulum tamamlandı! Arch River hazır." 10 50
-clear
+zenity --info --title="Kurulum Tamamlandı" --text="Arch River başarıyla kuruldu!"
