@@ -1,121 +1,109 @@
 #!/bin/bash
-echo "====================================="
-echo "   ARCH LINUX GNOME AUTO LOADER   "
-echo "====================================="
+set -euo pipefail
 
-# Sync package database
-pacman -Sy --noconfirm
-pacman -S --noconfirm lsblk parted
+TITLE="Arch Kurulum Sihirbazı"
+LOGFILE="/root/install.log"
 
-# Show disks
-lsblk
-echo " x PREPARE DISK "
-echo "Enter target disk (example: /dev/nvme0n1):"
-read CURRENTDISK
+# Varsayılan whiptail tema kullanılacak, özel renk tanımı yok
 
-echo "Enter new username (example: fari):"
-read NEWUSER
+# Disk seçimi (lsblk ile mevcut diskleri listele)
+DISK_LIST=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1" "$2}')
+ROOTPART=$(whiptail --title "Disk Seçimi" --menu "Root partition seçin:" 25 80 15 \
+$DISK_LIST \
+3>&1 1>&2 2>&3)
 
-echo "Enter password for new user:"
-read -s USERPASS
+# Locale seçimi
+LOCALE_LIST=$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1" "$1}')
+if [[ -z "$LOCALE_LIST" ]]; then
+  LOCALE_LIST="en_US.UTF-8 English-US tr_TR.UTF-8 Türkçe"
+fi
+LOCALE=$(whiptail --title "Dil ve Locale Seçimi" --menu "Bir locale seçin:" 25 80 15 \
+$LOCALE_LIST \
+3>&1 1>&2 2>&3)
 
-echo "Enter root password:"
-read -s ROOTPASS
+# Klavye seçimi
+KEYMAP=$(whiptail --title "Klavye Düzeni (Konsol)" --menu "Bir klavye seçin:" 25 80 15 \
+$(localectl list-keymaps | awk '{print $1" "$1}') \
+3>&1 1>&2 2>&3)
 
-# Partitioning
-parted $CURRENTDISK mklabel gpt
-parted $CURRENTDISK mkpart ESP fat32 1MiB 512MiB
-parted $CURRENTDISK set 1 boot on
-parted $CURRENTDISK mkpart primary 512MiB 100%
-
-# Partition variables (NVMe: p1/p2, SATA: sda1/sda2)
-BOOTPART=$(ls ${CURRENTDISK}* | grep -E "${CURRENTDISK}p?1$")
-ROOTPART=$(ls ${CURRENTDISK}* | grep -E "${CURRENTDISK}p?2$")
-
-echo "Boot Partition: $BOOTPART"
-echo "Root Partition: $ROOTPART"
-
-# Filesystems
-mkfs.fat -F32 $BOOTPART
-mkfs.ext4 $ROOTPART
-
-# Mounting
-mkdir /made
-mount $ROOTPART /made
-mkdir /made/boot
-mount $BOOTPART /made/boot
-
-# Base system
-pacstrap /made base linux linux-firmware networkmanager nano sudo gdm gnome plymouth unzip git
-genfstab -U /made >> /made/etc/fstab
-
-# Chroot configuration
-arch-chroot /made /bin/bash -c "
-
-# Bootloader
-bootctl install
-
-# Locale setup (ONLY English enabled)
-sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
-echo 'LANG=en_US.UTF-8' > /etc/locale.conf
-locale-gen
+# Timezone seçimi
+TIMEZONE_LIST=$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||')
+TIMEZONE=$(whiptail --title "Zaman Dilimi" --menu "Bir timezone seçin:" 25 80 15 \
+$(for t in $TIMEZONE_LIST; do echo "$t $t"; done) \
+3>&1 1>&2 2>&3)
 
 # Hostname
-echo 'arch-gnome' > /etc/hostname
+HOSTNAME=$(whiptail --inputbox "Hostname girin:" 10 60 "archlinux" 3>&1 1>&2 2>&3)
 
-# Hosts configuration
-cat <<EOL > /etc/hosts
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   arch-gnome.localdomain arch-gnome
-EOL
+# Kullanıcı bilgileri
+NEWUSER=$(whiptail --inputbox "Yeni kullanıcı adı:" 10 60 "user" 3>&1 1>&2 2>&3)
+USERPASS=$(whiptail --passwordbox "Yeni kullanıcı için şifre:" 10 60 3>&1 1>&2 2>&3)
+ROOTPASS=$(whiptail --passwordbox "Root için şifre:" 10 60 3>&1 1>&2 2>&3)
 
-# Timezone
-ln -sf /usr/share/zoneinfo/Europe/Istanbul /etc/localtime
-hwclock --systohc
+# Ağ tipi seçimi
+NETTYPE=$(whiptail --title "Ağ Yapılandırması" --menu "Bir ağ tipi seçin:" 20 70 10 \
+  dhcp "DHCP (otomatik)" \
+  static "Statik IP" \
+  wifi "Kablosuz Bağlantı" \
+  3>&1 1>&2 2>&3)
 
-# Boot loader config
-cat <<EOL > /boot/loader/loader.conf
-default arch
-timeout 3
-console-mode keep
-editor no
-EOL
+# Ağ arayüzü seçimi
+if [[ "$NETTYPE" == "wifi" ]]; then
+  INTERFACES=$(ls /sys/class/net | grep -E '^wl')
+  IFACE=$(whiptail --title "WiFi Arayüzü Seçimi" --menu "Bir WiFi arayüzü seçin:" 20 70 10 \
+  $(for i in $INTERFACES; do echo "$i $i"; done) \
+  3>&1 1>&2 2>&3)
 
-# Boot entry (UUID safer)
-cat <<EOL > /boot/loader/entries/arch.conf
-title   Arch Linux
-linux   /vmlinuz-linux
-initrd  /initramfs-linux.img
-options root=UUID=$(blkid -s UUID -o value $ROOTPART) rw quiet splash
-EOL
+  SSID_LIST=$(nmcli -t -f SSID dev wifi list ifname "$IFACE" | grep -v '^$' | sort -u)
+  SSID=$(whiptail --title "WiFi Ağları" --menu "Bir WiFi ağı seçin:" 20 70 10 \
+  $(for s in $SSID_LIST; do echo "$s $s"; done) \
+  3>&1 1>&2 2>&3)
 
-# Enable services
-systemctl enable gdm
-systemctl enable NetworkManager
+  WIFIPASS=$(whiptail --passwordbox "WiFi Şifresi (SSID: $SSID)" 10 60 3>&1 1>&2 2>&3)
+else
+  INTERFACES=$(ls /sys/class/net | grep -E '^(en|eth|eno|ens|enp)')
+  IFACE=$(whiptail --title "Kablolu Arayüz Seçimi" --menu "Bir ağ arayüzü seçin:" 20 70 10 \
+  $(for i in $INTERFACES; do echo "$i $i"; done) \
+  3>&1 1>&2 2>&3)
+fi
 
-# Sudoers
-echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
+if [[ "$NETTYPE" == "static" ]]; then
+  IPADDR=$(whiptail --inputbox "IP adresi (CIDR /24 varsayılacak):" 10 60 "192.168.1.100" 3>&1 1>&2 2>&3)
+  GATEWAY=$(whiptail --inputbox "Gateway:" 10 60 "192.168.1.1" 3>&1 1>&2 2>&3)
+  DNS=$(whiptail --inputbox "DNS:" 10 60 "8.8.8.8" 3>&1 1>&2 2>&3)
+fi
 
-# Create user and set passwords
-useradd -m -G wheel -s /bin/bash $NEWUSER
-echo \"$NEWUSER:$USERPASS\" | chpasswd
-echo \"root:$ROOTPASS\" | chpasswd
+# Masaüstü seçimi
+DESKTOP=$(whiptail --title "Masaüstü Ortamı" --menu "Bir masaüstü seçin:" 20 70 10 \
+  hyprland "Hyprland" \
+  enlightenment "Enlightenment" \
+  gnome "GNOME" \
+  kde "KDE Plasma" \
+  3>&1 1>&2 2>&3)
 
-# Plymouth theme setup
-git clone https://github.com/erenDO12/ARCHGNOMELOAD.git
-cd ARCHGNOMELOAD
-unzip GNOMEBOOT.zip
-mv GNOMEBOOT /usr/share/plymouth/themes/gnomeboot
-plymouth-set-default-theme gnomeboot
-mkinitcpio -P
-cd ..
-rm -rf ARCHGNOMELOAD
-pacman -R --noconfirm git
-"
+# Display Manager seçimi
+DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 \
+  "systemctl enable gdm" "GNOME Display Manager" \
+  "systemctl enable sddm" "Simple Desktop Display Manager" \
+  "systemctl enable lightdm" "LightDM" \
+  "none" "Yok" \
+  3>&1 1>&2 2>&3)
 
-# Cleanup
-umount -R /made
-echo "FINISH LOAD GNOME OS VIA ARCH LINUX"
-sleep 4
-exit
+# --- Chroot işlemleri ve ilerleme ---
+(
+echo 5; echo "Bootloader kuruluyor..."
+arch-chroot /mnt bootctl install
+) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
+
+umount -R /mnt || true
+
+# Kurulum tamamlandı mesajı
+whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux hazır.\nLog: $LOGFILE" 10 70
+
+# Yeniden başlatma sorusu
+if whiptail --yesno "Sistemi yeniden başlatmak ister misiniz?" 10 60; then
+  reboot
+fi
+
+# Ekranı temizle
+clear
