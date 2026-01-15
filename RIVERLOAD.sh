@@ -4,26 +4,26 @@ set -euo pipefail
 TITLE="Arch Kurulum Sihirbazı"
 LOGFILE="/root/install.log"
 
-# Tema ayarı: installer beyaz arka plan, border siyah arka plan
+# Tema ayarı
 export NEWT_COLORS='
 root=black,white
 border=white,black
 textbox=black,white
-button=black,white
+button=white,blue
 entry=black,white
 title=black,white
 '
 
 # Disk seçimi
-DISK=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1 " \"" $1 " (" $2 ")\""}')
+DISK=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1" "$1"("$2")"}')
 ROOTPART=$(whiptail --title "Disk Seçimi" --menu "Root partition seçin:" 25 80 15 \
 $DISK \
 3>&1 1>&2 2>&3)
 
 # Locale seçimi
-LOCALE_LIST=$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1 " \"" $1 "\""}')
+LOCALE_LIST=$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1" "$1}')
 if [[ -z "$LOCALE_LIST" ]]; then
-  LOCALE_LIST="en_US.UTF-8 \"English (US)\" tr_TR.UTF-8 \"Türkçe\""
+  LOCALE_LIST="en_US.UTF-8 English-US tr_TR.UTF-8 Türkçe"
 fi
 LOCALE=$(whiptail --title "Dil ve Locale Seçimi" --menu "Bir locale seçin:" 25 80 15 \
 $LOCALE_LIST \
@@ -31,12 +31,12 @@ $LOCALE_LIST \
 
 # Klavye seçimi
 KEYMAP=$(whiptail --title "Klavye Düzeni (Konsol)" --menu "Bir klavye seçin:" 25 80 15 \
-$(localectl list-keymaps | awk '{print $1 " \"" $1 "\""}') \
+$(localectl list-keymaps | awk '{print $1" "$1}') \
 3>&1 1>&2 2>&3)
 
 # Timezone seçimi
 TIMEZONE=$(whiptail --title "Zaman Dilimi" --menu "Bir timezone seçin:" 25 80 15 \
-$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||' | awk '{print $1 " \"" $1 "\""}') \
+$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||' | awk '{print $1" "$1}') \
 3>&1 1>&2 2>&3)
 
 # Hostname
@@ -49,9 +49,9 @@ ROOTPASS=$(whiptail --passwordbox "Root için şifre:" 10 60 3>&1 1>&2 2>&3)
 
 # Ağ tipi seçimi
 NETTYPE=$(whiptail --title "Ağ Yapılandırması" --menu "Bir ağ tipi seçin:" 20 70 10 \
-  "dhcp" "DHCP (otomatik)" \
-  "static" "Statik IP" \
-  "wifi" "Kablosuz Bağlantı" \
+  dhcp "DHCP (otomatik)" \
+  static "Statik IP" \
+  wifi "Kablosuz Bağlantı" \
   3>&1 1>&2 2>&3)
 
 # Ağ arayüzü seçimi
@@ -82,10 +82,10 @@ fi
 
 # Masaüstü seçimi
 DESKTOP=$(whiptail --title "Masaüstü Ortamı" --menu "Bir masaüstü seçin:" 20 70 10 \
-  "hyprland" "Hyprland" \
-  "enlightenment" "Enlightenment" \
-  "gnome" "GNOME" \
-  "kde" "KDE Plasma" \
+  hyprland "Hyprland" \
+  enlightenment "Enlightenment" \
+  gnome "GNOME" \
+  kde "KDE Plasma" \
   3>&1 1>&2 2>&3)
 
 # Display Manager seçimi
@@ -93,7 +93,7 @@ DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 
   "systemctl enable gdm" "GNOME Display Manager" \
   "systemctl enable sddm" "Simple Desktop Display Manager" \
   "systemctl enable lightdm" "LightDM" \
-  "true" "Yok" \
+  true "Yok" \
   3>&1 1>&2 2>&3)
 
 # --- Chroot işlemleri ve ilerleme ---
