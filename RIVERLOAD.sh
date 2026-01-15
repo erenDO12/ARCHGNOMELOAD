@@ -29,7 +29,7 @@ mount /dev/${DISK}1 /mnt/boot
 # 2. Temel Sistem Kurulumu
 # ------------------------------------------------------------
 whiptail --title "Temel Sistem Kurulumu" --msgbox "Arch Linux temel paketleri kuruluyor..." 10 60
-pacstrap /mnt base linux linux-firmware vim networkmanager
+pacstrap /mnt base linux linux-firmware vim networkmanager git base-devel
 
 # ------------------------------------------------------------
 # 3. fstab Oluşturma
@@ -72,13 +72,17 @@ ROOTPASS=$(whiptail --title "Root Şifresi" --passwordbox "Root için şifre:" 1
 echo "root:$ROOTPASS" | chpasswd
 
 # Masaüstü Ortamı
-DE=$(whiptail --title "Masaüstü Ortamı" --menu "Masaüstü ortamı seçin:" 20 70 10 \
+DE=$(whiptail --title "Masaüstü Ortamı" --menu "Masaüstü ortamı seçin:" 20 70 12 \
 "gnome" "GNOME" \
 "kde" "KDE Plasma" \
 "xfce4" "XFCE" \
 "cinnamon" "Cinnamon" \
 "mate" "MATE" \
 "lxqt" "LXQt" \
+"deepin" "Deepin" \
+"sway" "Sway (Wayland)" \
+"river" "River (Wayland, AUR)" \
+"niri" "Niri (Wayland, AUR)" \
 3>&1 1>&2 2>&3)
 
 case $DE in
@@ -88,6 +92,16 @@ case $DE in
   cinnamon) pacman -S --noconfirm cinnamon lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
   mate) pacman -S --noconfirm mate mate-extra lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
   lxqt) pacman -S --noconfirm lxqt openbox sddm; systemctl enable sddm ;;
+  deepin) pacman -S --noconfirm deepin deepin-extra lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
+  sway) pacman -S --noconfirm sway ;;
+  river) sudo -u "$USERNAME" git clone https://aur.archlinux.org/yay.git /home/$USERNAME/yay && \
+         chown -R "$USERNAME":"$USERNAME" /home/$USERNAME/yay && \
+         cd /home/$USERNAME/yay && sudo -u "$USERNAME" makepkg -si --noconfirm && \
+         sudo -u "$USERNAME" yay -S --noconfirm river ;;
+  niri) sudo -u "$USERNAME" git clone https://aur.archlinux.org/yay.git /home/$USERNAME/yay && \
+        chown -R "$USERNAME":"$USERNAME" /home/$USERNAME/yay && \
+        cd /home/$USERNAME/yay && sudo -u "$USERNAME" makepkg -si --noconfirm && \
+        sudo -u "$USERNAME" yay -S --noconfirm niri ;;
 esac
 
 # Bootloader
