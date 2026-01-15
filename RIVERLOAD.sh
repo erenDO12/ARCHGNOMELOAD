@@ -4,17 +4,20 @@ set -euo pipefail
 TITLE="Arch Kurulum Sihirbazı"
 LOGFILE="/root/install.log"
 
-# --- Locale seçimi (tam liste) ---
+# Root partition seçimi
+ROOTPART=$(whiptail --inputbox "Root partition cihaz yolunu girin (örn: /dev/nvme0n1p3 veya /dev/sda2):" 10 70 "/dev/sda2" 3>&1 1>&2 2>&3)
+
+# Locale seçimi
 LOCALE=$(whiptail --title "Dil ve Locale Seçimi" --menu "Bir locale seçin:" 25 80 15 \
-$(grep -E "^[a-z]" /usr/share/i18n/SUPPORTED | awk '{print $1 " \"" $1 "\""}') \
+$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1 " \"" $1 "\""}') \
 3>&1 1>&2 2>&3)
 
-# --- Klavye seçimi (tam liste) ---
-KEYMAP=$(whiptail --title "Klavye Düzeni" --menu "Bir klavye seçin:" 25 80 15 \
+# Klavye seçimi
+KEYMAP=$(whiptail --title "Klavye Düzeni (Konsol)" --menu "Bir klavye seçin:" 25 80 15 \
 $(localectl list-keymaps | awk '{print $1 " \"" $1 "\""}') \
 3>&1 1>&2 2>&3)
 
-# --- Timezone seçimi (tam liste) ---
+# Timezone seçimi
 TIMEZONE=$(whiptail --title "Zaman Dilimi" --menu "Bir timezone seçin:" 25 80 15 \
 $(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||' | awk '{print $1 " \"" $1 "\""}') \
 3>&1 1>&2 2>&3)
@@ -34,21 +37,30 @@ NETTYPE=$(whiptail --title "Ağ Yapılandırması" --menu "Bir ağ tipi seçin:"
   "wifi" "Kablosuz Bağlantı" \
   3>&1 1>&2 2>&3)
 
-# Ağ arayüzü seçimi
-INTERFACES=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo)
-IFACE=$(whiptail --title "Ağ Arayüzü Seçimi" --menu "Bir ağ arayüzü seçin:" 20 70 10 \
-$(for i in $INTERFACES; do echo "$i $i"; done) \
-3>&1 1>&2 2>&3)
+# Ağ arayüzü ve WiFi SSID seçimi
+if [[ "$NETTYPE" == "wifi" ]]; then
+  INTERFACES=$(ls /sys/class/net | grep -E '^wl')
+  IFACE=$(whiptail --title "WiFi Arayüzü Seçimi" --menu "Bir WiFi arayüzü seçin:" 20 70 10 \
+  $(for i in $INTERFACES; do echo "$i $i"; done) \
+  3>&1 1>&2 2>&3)
 
-if [[ "$NETTYPE" == "static" ]]; then
-  IPADDR=$(whiptail --inputbox "IP adresi:" 10 60 "192.168.1.100" 3>&1 1>&2 2>&3)
-  GATEWAY=$(whiptail --inputbox "Gateway:" 10 60 "192.168.1.1" 3>&1 1>&2 2>&3)
-  DNS=$(whiptail --inputbox "DNS:" 10 60 "8.8.8.8" 3>&1 1>&2 2>&3)
+  SSID_LIST=$(nmcli -t -f SSID dev wifi list ifname "$IFACE" | grep -v '^$' | sort -u)
+  SSID=$(whiptail --title "WiFi Ağları" --menu "Bir WiFi ağı seçin:" 20 70 10 \
+  $(for s in $SSID_LIST; do echo "$s $s"; done) \
+  3>&1 1>&2 2>&3)
+
+  WIFIPASS=$(whiptail --passwordbox "WiFi Şifresi (SSID: $SSID)" 10 60 3>&1 1>&2 2>&3)
+else
+  INTERFACES=$(ls /sys/class/net | grep -E '^(en|eth|eno|ens|enp)')
+  IFACE=$(whiptail --title "Kablolu Arayüz Seçimi" --menu "Bir ağ arayüzü seçin:" 20 70 10 \
+  $(for i in $INTERFACES; do echo "$i $i"; done) \
+  3>&1 1>&2 2>&3)
 fi
 
-if [[ "$NETTYPE" == "wifi" ]]; then
-  SSID=$(whiptail --inputbox "WiFi SSID:" 10 60 3>&1 1>&2 2>&3)
-  WIFIPASS=$(whiptail --passwordbox "WiFi Şifresi:" 10 60 3>&1 1>&2 2>&3)
+if [[ "$NETTYPE" == "static" ]]; then
+  IPADDR=$(whiptail --inputbox "IP adresi (CIDR /24 varsayılacak):" 10 60 "192.168.1.100" 3>&1 1>&2 2>&3)
+  GATEWAY=$(whiptail --inputbox "Gateway:" 10 60 "192.168.1.1" 3>&1 1>&2 2>&3)
+  DNS=$(whiptail --inputbox "DNS:" 10 60 "8.8.8.8" 3>&1 1>&2 2>&3)
 fi
 
 # Masaüstü seçimi
@@ -67,7 +79,7 @@ DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 
   "true" "Yok" \
   3>&1 1>&2 2>&3)
 
-# --- Chroot işlemleri ---
+# --- Chroot işlemleri ve ilerleme ---
 (
 echo 5; echo "Bootloader kuruluyor..."
 arch-chroot /mnt bootctl install
@@ -84,15 +96,15 @@ locale-gen
 "
 
 echo 25; echo "Hostname ayarlanıyor..."
-echo "${HOSTNAME}" | arch-chroot /mnt tee /etc/hostname
+echo "${HOSTNAME}" | arch-chroot /mnt tee /etc/hostname >/dev/null
 
 echo 35; echo "Timezone ayarlanıyor..."
 arch-chroot /mnt ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
 arch-chroot /mnt hwclock --systohc
 
 echo 45; echo "Klavye ayarlanıyor..."
-echo "KEYMAP=${KEYMAP}" | arch-chroot /mnt tee /etc/vconsole.conf
-arch-chroot /mnt localectl set-x11-keymap ${KEYMAP}
+echo "KEYMAP=${KEYMAP}" | arch-chroot /mnt tee /etc/vconsole.conf >/dev/null
+arch-chroot /mnt localectl set-keymap ${KEYMAP} || true
 
 echo 55; echo "Bootloader yapılandırılıyor..."
 ROOTUUID=$(blkid -s UUID -o value ${ROOTPART})
@@ -127,15 +139,15 @@ EOL"
 fi
 if [[ "$NETTYPE" == "wifi" ]]; then
   arch-chroot /mnt systemctl enable NetworkManager
-  arch-chroot /mnt nmcli dev wifi connect "${SSID}" password "${WIFIPASS}" ifname "${IFACE}" || true
+  arch-chroot /mnt bash -c "nmcli dev wifi connect \"${SSID}\" password \"${WIFIPASS}\" ifname \"${IFACE}\" || true"
 fi
 
-echo 75; echo "Display Manager kuruluyor..."
+echo 75; echo "Display Manager etkinleştiriliyor..."
 arch-chroot /mnt bash -c "${DM_ENABLE}"
 
 echo 85; echo "Masaüstü ortamı ayarlanıyor..."
 if [[ "${DESKTOP}" == "hyprland" ]]; then
-  arch-chroot /mnt pacman -Sy --noconfirm tuigreet
+  arch-chroot /mnt pacman -Sy --noconfirm tuigreet || true
   arch-chroot /mnt bash -c "mkdir -p /etc/greetd && cat > /etc/greetd/config.toml <<EOL
 [terminal]
 vt = 1
@@ -144,6 +156,7 @@ command = \"tuigreet --time --cmd Hyprland\"
 user = \"greeter\"
 EOL"
 fi
+
 if [[ "${DESKTOP}" == "enlightenment" ]]; then
   arch-chroot /mnt bash -c "mkdir -p /home/${NEWUSER}/.e && cat > /home/${NEWUSER}/.e/e.src <<EOL
 group \"shelves\" struct {
@@ -152,7 +165,9 @@ group \"shelves\" struct {
     value \"style\" string: \"default\";
     group \"contents\" list {
       group \"item\" struct {
-        value \"     }
+        value \"name\" string: \"Network\";
+      }
+    }
   }
 }
 EOL"
@@ -168,7 +183,7 @@ echo "root:${ROOTPASS}" | arch-chroot /mnt chpasswd
 echo 100; echo "Kurulum tamamlandı!"
 ) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
 
-umount -R /mnt
+umount -R /mnt || true
 whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux hazır.\nLog: $LOGFILE" 10 70
 clear
 
