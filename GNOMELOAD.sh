@@ -1,109 +1,200 @@
 #!/bin/bash
 set -euo pipefail
 
-TITLE="Arch Kurulum Sihirbazı"
-LOGFILE="/root/install.log"
+TITLE="Arch GNOME Installer"
+LOGFILE="install.log"
 
-# Varsayılan whiptail tema kullanılacak, özel renk tanımı yok
-
-# Disk seçimi (lsblk ile mevcut diskleri listele)
-DISK_LIST=$(lsblk -ndo NAME,SIZE,TYPE | grep disk | awk '{print "/dev/"$1" "$2}')
-ROOTPART=$(whiptail --title "Disk Seçimi" --menu "Root partition seçin:" 25 80 15 \
-$DISK_LIST \
-3>&1 1>&2 2>&3)
-
-# Locale seçimi
-LOCALE_LIST=$(grep -E "^[^#].*UTF-8" /etc/locale.gen | awk '{print $1" "$1}')
-if [[ -z "$LOCALE_LIST" ]]; then
-  LOCALE_LIST="en_US.UTF-8 English-US tr_TR.UTF-8 Türkçe"
+# Root kontrolü
+if [[ $EUID -ne 0 ]]; then
+  echo "Bu script root olarak çalıştırılmalıdır."
+  exit 1
 fi
-LOCALE=$(whiptail --title "Dil ve Locale Seçimi" --menu "Bir locale seçin:" 25 80 15 \
-$LOCALE_LIST \
+
+if ! command -v whiptail >/dev/null 2>&1; then
+  echo "whiptail yüklü değil. 'pacman -Sy --noconfirm libnewt' ile yükleyin."
+  exit 1
+fi
+
+if ! whiptail --title "$TITLE" --yesno "Kuruluma başlamak istiyor musunuz?" 10 60; then
+  clear; echo "Kurulum iptal edildi."; exit 1
+fi
+
+umount -R /mnt 2>/dev/null || true
+mkdir -p /mnt
+
+(
+echo 5; echo "Disk seçimi..."
+DISKS=$(lsblk -dpno NAME | grep -E "/dev/sd|/dev/nvme|/dev/vda")
+MENU_OPTS=()
+for d in $DISKS; do MENU_OPTS+=("$d" "$(lsblk -dnpo SIZE "$d")"); done
+DISK=$(whiptail --title "$TITLE" --menu "Hedef Disk Seçin (TÜM VERİLER SİLİNECEK):" 20 70 10 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
+
+NEWUSER=$(whiptail --title "$TITLE" --inputbox "Yeni kullanıcı adı:" 10 60 3>&1 1>&2 2>&3)
+USERPASS=$(whiptail --title "$TITLE" --passwordbox "Kullanıcı şifresi:" 10 60 3>&1 1>&2 2>&3)
+ROOTPASS=$(whiptail --title "$TITLE" --passwordbox "Root şifresi:" 10 60 3>&1 1>&2 2>&3)
+
+# Dinamik locale listesi
+LOCALES=$(locale -a | grep UTF-8)
+MENU_OPTS=()
+for l in $LOCALES; do MENU_OPTS+=("$l" "$l"); done
+LOCALE=$(whiptail --title "$TITLE" --menu "Dil/Locale Seçin:" 20 70 15 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
+
+# Dinamik klavye listesi
+KEYMAPS=$(localectl list-keymaps | head -n 200)
+MENU_OPTS=()
+for k in $KEYMAPS; do MENU_OPTS+=("$k" "$k"); done
+KEYMAP=$(whiptail --title "$TITLE" --menu "Klavye Düzeni Seçin:" 20 70 15 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
+
+# Dinamik timezone listesi
+TIMEZONES=$(timedatectl list-timezones | head -n 200)
+MENU_OPTS=()
+for t in $TIMEZONES; do MENU_OPTS+=("$t" "$t"); done
+TIMEZONE=$(whiptail --title "$TITLE" --menu "Zaman Dilimi Seçin:" 20 70 15 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
+
+HOSTNAME=$(whiptail --title "$TITLE" --inputbox "Hostname (Bilgisayar adı):" 10 60 3>&1 1>&2 2>&3)
+
+NETTYPE=$(whiptail --title "$TITLE" --menu "Ağ Tipi Seçin:" 20 70 10 \
+"dhcp" "Otomatik (DHCP)" \
+"static" "Statik IP" \
+"wifi" "Kablosuz (Wi-Fi)" \
 3>&1 1>&2 2>&3)
 
-# Klavye seçimi
-KEYMAP=$(whiptail --title "Klavye Düzeni (Konsol)" --menu "Bir klavye seçin:" 25 80 15 \
-$(localectl list-keymaps | awk '{print $1" "$1}') \
-3>&1 1>&2 2>&3)
+if [ "$NETTYPE" = "static" ]; then
+  IPADDR=$(whiptail --title "$TITLE" --inputbox "IP Adresi:" 10 60 3>&1 1>&2 2>&3)
+  NETMASK=$(whiptail --title "$TITLE" --inputbox "Ağ Maskesi:" 10 60 3>&1 1>&2 2>&3)
+  GATEWAY=$(whiptail --title "$TITLE" --inputbox "Gateway:" 10 60 3>&1 1>&2 2>&3)
+  DNS=$(whiptail --title "$TITLE" --inputbox "DNS:" 10 60 3>&1 1>&2 2>&3)
+fi
 
-# Timezone seçimi
-TIMEZONE_LIST=$(find /usr/share/zoneinfo -type f | sed 's|/usr/share/zoneinfo/||')
-TIMEZONE=$(whiptail --title "Zaman Dilimi" --menu "Bir timezone seçin:" 25 80 15 \
-$(for t in $TIMEZONE_LIST; do echo "$t $t"; done) \
+if [ "$NETTYPE" = "wifi" ]; then
+  SSID=$(whiptail --title "$TITLE" --inputbox "Wi-Fi SSID:" 10 60 3>&1 1>&2 2>&3)
+  WIFIPASS=$(whiptail --title "$TITLE" --passwordbox "Wi-Fi Şifresi:" 10 60 3>&1 1>&2 2>&3)
+fi
+
+EXTRAPKGS=$(whiptail --title "$TITLE" --checklist "Ek paketleri seçin:" 20 70 10 \
+"firefox" "Web tarayıcı (Firefox)" ON \
+"chromium" "Web tarayıcı (Chromium)" OFF \
+"libreoffice-fresh" "Ofis paketi" ON \
+"vlc" "Medya oynatıcı" ON \
+"gimp" "Resim düzenleyici" OFF \
+"cups" "Yazıcı desteği" OFF \
+"base-devel" "Derleme araçları" ON \
+"flatpak" "Flatpak desteği" OFF \
+"pipewire" "Ses sistemi" ON \
 3>&1 1>&2 2>&3)
+EXTRAPKGS=$(echo $EXTRAPKGS | sed 's/"//g')
+
+echo 15; echo "Disk bölümlendirme..."
+parted -s "$DISK" mklabel gpt
+parted -s "$DISK" mkpart ESP fat32 1MiB 512MiB
+parted -s "$DISK" set 1 boot on
+parted -s "$DISK" mkpart primary 512MiB 100%
+
+BOOTPART=$(ls "${DISK}"* | grep -E "${DISK}p?1$")
+ROOTPART=$(ls "${DISK}"* | grep -E "${DISK}p?2$")
+
+mkfs.fat -F32 "$BOOTPART"
+mkfs.ext4 -F "$ROOTPART"
+
+echo 25; echo "Disk mount ediliyor..."
+mount "$ROOTPART" /mnt
+mkdir -p /mnt/boot
+mount "$BOOTPART" /mnt/boot
+
+echo 40; echo "Mirror listesi güncelleniyor..."
+pacman -Sy --noconfirm
+
+# GNOME paketleri
+DESKTOP_PKGS="gnome gdm"
+DM_ENABLE="systemctl enable gdm"
+
+echo 55; echo "Temel sistem kuruluyor..."
+pacstrap /mnt base linux linux-firmware $DESKTOP_PKGS $EXTRAPKGS nano sudo vim git unzip plymouth systemd networkmanager network-manager-applet
+
+echo 70; echo "fstab oluşturuluyor..."
+genfstab -U /mnt >> /mnt/etc/fstab
+
+echo 85; echo "Chroot işlemleri..."
+arch-chroot /mnt bash -c "
+bootctl install
+
+# Locale
+if grep -q \"^#${LOCALE}\" /etc/locale.gen; then
+  sed -i \"s/^#${LOCALE}/${LOCALE}/\" /etc/locale.gen
+elif ! grep -q \"^${LOCALE}\" /etc/locale.gen; then
+  echo \"${LOCALE}\" >> /etc/locale.gen
+fi
+echo \"LANG=${LOCALE}\" > /etc/locale.conf
+locale-gen
 
 # Hostname
-HOSTNAME=$(whiptail --inputbox "Hostname girin:" 10 60 "archlinux" 3>&1 1>&2 2>&3)
+echo \"${HOSTNAME}\" > /etc/hostname
 
-# Kullanıcı bilgileri
-NEWUSER=$(whiptail --inputbox "Yeni kullanıcı adı:" 10 60 "user" 3>&1 1>&2 2>&3)
-USERPASS=$(whiptail --passwordbox "Yeni kullanıcı için şifre:" 10 60 3>&1 1>&2 2>&3)
-ROOTPASS=$(whiptail --passwordbox "Root için şifre:" 10 60 3>&1 1>&2 2>&3)
+# Timezone
+ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
+hwclock --systohc
 
-# Ağ tipi seçimi
-NETTYPE=$(whiptail --title "Ağ Yapılandırması" --menu "Bir ağ tipi seçin:" 20 70 10 \
-  dhcp "DHCP (otomatik)" \
-  static "Statik IP" \
-  wifi "Kablosuz Bağlantı" \
-  3>&1 1>&2 2>&3)
+# Keyboard
+echo \"KEYMAP=${KEYMAP}\" > /etc/vconsole.conf
+localectl set-x11-keymap ${KEYMAP}
 
-# Ağ arayüzü seçimi
-if [[ "$NETTYPE" == "wifi" ]]; then
-  INTERFACES=$(ls /sys/class/net | grep -E '^wl')
-  IFACE=$(whiptail --title "WiFi Arayüzü Seçimi" --menu "Bir WiFi arayüzü seçin:" 20 70 10 \
-  $(for i in $INTERFACES; do echo "$i $i"; done) \
-  3>&1 1>&2 2>&3)
+# Bootloader
+cat > /boot/loader/loader.conf <<EOL
+default arch
+timeout 3
+console-mode keep
+editor no
+EOL
 
-  SSID_LIST=$(nmcli -t -f SSID dev wifi list ifname "$IFACE" | grep -v '^$' | sort -u)
-  SSID=$(whiptail --title "WiFi Ağları" --menu "Bir WiFi ağı seçin:" 20 70 10 \
-  $(for s in $SSID_LIST; do echo "$s $s"; done) \
-  3>&1 1>&2 2>&3)
+ROOTUUID=\$(blkid -s UUID -o value ${ROOTPART})
+cat > /boot/loader/entries/arch.conf <<EOL
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options root=UUID=\${ROOTUUID} rw quiet splash
+EOL
 
-  WIFIPASS=$(whiptail --passwordbox "WiFi Şifresi (SSID: $SSID)" 10 60 3>&1 1>&2 2>&3)
-else
-  INTERFACES=$(ls /sys/class/net | grep -E '^(en|eth|eno|ens|enp)')
-  IFACE=$(whiptail --title "Kablolu Arayüz Seçimi" --menu "Bir ağ arayüzü seçin:" 20 70 10 \
-  $(for i in $INTERFACES; do echo "$i $i"; done) \
-  3>&1 1>&2 2>&3)
+# Ağ yapılandırması
+if [[ \"${NETTYPE}\" == \"dhcp\" ]]; then
+  systemctl enable NetworkManager
 fi
 
-if [[ "$NETTYPE" == "static" ]]; then
-  IPADDR=$(whiptail --inputbox "IP adresi (CIDR /24 varsayılacak):" 10 60 "192.168.1.100" 3>&1 1>&2 2>&3)
-  GATEWAY=$(whiptail --inputbox "Gateway:" 10 60 "192.168.1.1" 3>&1 1>&2 2>&3)
-  DNS=$(whiptail --inputbox "DNS:" 10 60 "8.8.8.8" 3>&1 1>&2 2>&3)
+if [[ \"${NETTYPE}\" == \"static\" ]]; then
+  mkdir -p /etc/systemd/network
+  cat > /etc/systemd/network/20-wired.network <<EOL
+[Match]
+Name=en*
+[Network]
+Address=${IPADDR}/24
+Gateway=${GATEWAY}
+DNS=${DNS}
+EOL
+  systemctl enable systemd-networkd
+  systemctl enable systemd-resolved
 fi
 
-# Masaüstü seçimi
-DESKTOP=$(whiptail --title "Masaüstü Ortamı" --menu "Bir masaüstü seçin:" 20 70 10 \
-  hyprland "Hyprland" \
-  enlightenment "Enlightenment" \
-  gnome "GNOME" \
-  kde "KDE Plasma" \
-  3>&1 1>&2 2>&3)
+if [[ "${NETTYPE}" == "wifi" ]]; then
+  systemctl enable NetworkManager
+  nmcli dev wifi connect "${SSID}" password "${WIFIPASS}" || true
+fi
 
-# Display Manager seçimi
-DM_ENABLE=$(whiptail --title "Display Manager" --menu "Bir DM seçin:" 20 70 10 \
-  "systemctl enable gdm" "GNOME Display Manager" \
-  "systemctl enable sddm" "Simple Desktop Display Manager" \
-  "systemctl enable lightdm" "LightDM" \
-  "none" "Yok" \
-  3>&1 1>&2 2>&3)
+# GNOME için display manager
+${DM_ENABLE}
 
-# --- Chroot işlemleri ve ilerleme ---
-(
-echo 5; echo "Bootloader kuruluyor..."
-arch-chroot /mnt bootctl install
+# Sudo ve kullanıcı
+echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
+useradd -m -G wheel -s /bin/bash ${NEWUSER}
+echo "${NEWUSER}:${USERPASS}" | chpasswd
+echo "root:${ROOTPASS}" | chpasswd
+"
+
+echo 100; echo "Kurulum tamamlandı!"
 ) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
 
-umount -R /mnt || true
+umount -R /mnt
+whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux GNOME hazır.\nLog: $LOGFILE" 10 70
+clear
 
-# Kurulum tamamlandı mesajı
-whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux hazır.\nLog: $LOGFILE" 10 70
-
-# Yeniden başlatma sorusu
 if whiptail --yesno "Sistemi yeniden başlatmak ister misiniz?" 10 60; then
   reboot
 fi
-
-# Ekranı temizle
-clear
