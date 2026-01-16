@@ -1,149 +1,138 @@
 #!/bin/bash
 set -euo pipefail
 
-TITLE="Arch Kurulum"
-LOGFILE="/root/kurulum.log"
-exec > >(tee -a $LOGFILE) 2>&1
+TITLE="Arch Desktop Installer"
+LOGFILE="install.log"
 
-# ------------------------------------------------------------
-# 1. Disk Seçimi ve Bölümler
-# ------------------------------------------------------------
-DISK=$(lsblk -d -n -o NAME | while read name; do
-  echo "/dev/$name" "$name"
-done | whiptail --title "Disk Seçimi" --menu "Kurulum yapılacak diski seçin:" 20 70 10 \
-3>&1 1>&2 2>&3)
-
-if [[ $DISK == *"nvme"* ]]; then
-  BOOTPART="${DISK}p1"
-  ROOTPART="${DISK}p2"
-else
-  BOOTPART="${DISK}1"
-  ROOTPART="${DISK}2"
+# Root kontrolü
+if [[ $EUID -ne 0 ]]; then
+  echo "Bu script root olarak çalıştırılmalıdır."
+  exit 1
 fi
 
-mkfs.fat -F32 $BOOTPART
-mkfs.ext4 $ROOTPART
+if ! command -v whiptail >/dev/null 2>&1; then
+  echo "whiptail yüklü değil. 'pacman -Sy --noconfirm libnewt' ile yükleyin."
+  exit 1
+fi
 
-mount $ROOTPART /mnt
-mkdir -p /mnt/boot
-mount $BOOTPART /mnt/boot
+if ! whiptail --title "$TITLE" --yesno "Kuruluma başlamak istiyor musunuz?" 10 60; then
+  clear; echo "Kurulum iptal edildi."; exit 1
+fi
 
-# ------------------------------------------------------------
-# 2. Ağ Ayarları
-# ------------------------------------------------------------
-pacman -Sy --noconfirm networkmanager dialog
-systemctl enable NetworkManager
+umount -R /mnt 2>/dev/null || true
+mkdir -p /mnt
 
-ETHDEV=$(ip link | awk -F: '/state UP|state DOWN/ && $2 ~ /en/ {print $2; exit}' | tr -d ' ')
-NETNAME=$(whiptail --title "Ağ Bağlantısı" --inputbox "Bağlantı adı:" 10 60 "$ETHDEV" 3>&1 1>&2 2>&3)
+(
+echo 5; echo "Disk seçimi..."
+DISKS=$(lsblk -dpno NAME | grep -E "/dev/sd|/dev/nvme|/dev/vda")
+MENU_OPTS=()
+for d in $DISKS; do MENU_OPTS+=("$d" "$(lsblk -dnpo SIZE "$d")"); done
+DISK=$(whiptail --title "$TITLE" --menu "Hedef Disk Seçin (TÜM VERİLER SİLİNECEK):" 20 70 10 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
 
-# ------------------------------------------------------------
-# 3. Kullanıcı Bilgileri
-# ------------------------------------------------------------
-USERNAME=$(whiptail --title "Kullanıcı Adı" --inputbox "Yeni kullanıcı adı:" 10 60 3>&1 1>&2 2>&3)
-USERPASS=$(whiptail --title "Kullanıcı Şifresi" --passwordbox "$USERNAME için şifre:" 10 60 3>&1 1>&2 2>&3)
-ROOTPASS=$(whiptail --title "Root Şifresi" --passwordbox "Root için şifre:" 10 60 3>&1 1>&2 2>&3)
+NEWUSER=$(whiptail --title "$TITLE" --inputbox "Yeni kullanıcı adı:" 10 60 3>&1 1>&2 2>&3)
+USERPASS=$(whiptail --title "$TITLE" --passwordbox "Kullanıcı şifresi:" 10 60 3>&1 1>&2 2>&3)
+ROOTPASS=$(whiptail --title "$TITLE" --passwordbox "Root şifresi:" 10 60 3>&1 1>&2 2>&3)
 
-# ------------------------------------------------------------
-# 4. Dil, Zaman Dilimi, Klavye
-# ------------------------------------------------------------
-LOCALE=$(whiptail --title "Dil Seçimi" --menu "Dil seçin:" 20 70 10 \
-$(grep -E "UTF-8" /etc/locale.gen | sed 's/#//g' | awk '{print $1 " " $1}') \
+# Dinamik locale listesi
+LOCALES=$(locale -a | grep UTF-8)
+MENU_OPTS=()
+for l in $LOCALES; do MENU_OPTS+=("$l" "$l"); done
+LOCALE=$(whiptail --title "$TITLE" --menu "Dil/Locale Seçin:" 20 70 15 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
+
+# Dinamik klavye listesi
+KEYMAPS=$(localectl list-keymaps | head -n 200) # çok uzun olmasın
+MENU_OPTS=()
+for k in $KEYMAPS; do MENU_OPTS+=("$k" "$k"); done
+KEYMAP=$(whiptail --title "$TITLE" --menu "Klavye Düzeni Seçin:" 20 70 15 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
+
+# Dinamik timezone listesi
+TIMEZONES=$(timedatectl list-timezones | head -n 200)
+MENU_OPTS=()
+for t in $TIMEZONES; do MENU_OPTS+=("$t" "$t"); done
+TIMEZONE=$(whiptail --title "$TITLE" --menu "Zaman Dilimi Seçin:" 20 70 15 "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
+
+HOSTNAME=$(whiptail --title "$TITLE" --inputbox "Hostname (Bilgisayar adı):" 10 60 3>&1 1>&2 2>&3)
+
+NETTYPE=$(whiptail --title "$TITLE" --menu "Ağ Tipi Seçin:" 20 70 10 \
+"dhcp" "Otomatik (DHCP)" \
+"static" "Statik IP" \
+"wifi" "Kablosuz (Wi-Fi)" \
 3>&1 1>&2 2>&3)
 
-TIMEZONE=$(whiptail --title "Zaman Dilimi" --menu "Zaman dilimi seçin:" 20 70 15 \
-$(timedatectl list-timezones | awk '{print $1 " " $1}') \
-3>&1 1>&2 2>&3)
+if [ "$NETTYPE" = "static" ]; then
+  IPADDR=$(whiptail --title "$TITLE" --inputbox "IP Adresi:" 10 60 3>&1 1>&2 2>&3)
+  NETMASK=$(whiptail --title "$TITLE" --inputbox "Ağ Maskesi:" 10 60 3>&1 1>&2 2>&3)
+  GATEWAY=$(whiptail --title "$TITLE" --inputbox "Gateway:" 10 60 3>&1 1>&2 2>&3)
+  DNS=$(whiptail --title "$TITLE" --inputbox "DNS:" 10 60 3>&1 1>&2 2>&3)
+fi
 
-KEYMAP=$(whiptail --title "Klavye Düzeni" --menu "Klavye düzeni seçin:" 20 70 15 \
-$(localectl list-keymaps | awk '{print $1 " " $1}') \
-3>&1 1>&2 2>&3)
+if [ "$NETTYPE" = "wifi" ]; then
+  SSID=$(whiptail --title "$TITLE" --inputbox "Wi-Fi SSID:" 10 60 3>&1 1>&2 2>&3)
+  WIFIPASS=$(whiptail --title "$TITLE" --passwordbox "Wi-Fi Şifresi:" 10 60 3>&1 1>&2 2>&3)
+fi
 
-# ------------------------------------------------------------
-# 5. Masaüstü Ortamı
-# ------------------------------------------------------------
-DE=$(whiptail --title "Masaüstü Ortamı" --menu "Masaüstü ortamı seçin:" 20 70 12 \
+DESKTOP=$(whiptail --title "$TITLE" --menu "Masaüstü Ortamı Seçin:" 20 70 12 \
+"enlightenment" "Enlightenment" \
+"hyprland" "Hyprland (Wayland)" \
 "gnome" "GNOME" \
 "kde" "KDE Plasma" \
-"xfce4" "XFCE" \
-"cinnamon" "Cinnamon" \
-"mate" "MATE" \
+"xfce" "XFCE" \
 "lxqt" "LXQt" \
-"deepin" "Deepin" \
-"sway" "Sway (Wayland)" \
-"river" "River (Wayland, AUR)" \
 3>&1 1>&2 2>&3)
 
-# ------------------------------------------------------------
-# 6. Temel Sistem Kurulumu
-# ------------------------------------------------------------
-pacstrap /mnt base linux linux-firmware vim networkmanager git base-devel
-genfstab -U /mnt >> /mnt/etc/fstab
+EXTRAPKGS=$(whiptail --title "$TITLE" --checklist "Ek paketleri seçin:" 20 70 10 \
+"firefox" "Web tarayıcı (Firefox)" ON \
+"chromium" "Web tarayıcı (Chromium)" OFF \
+"libreoffice-fresh" "Ofis paketi" ON \
+"vlc" "Medya oynatıcı" ON \
+"gimp" "Resim düzenleyici" OFF \
+"cups" "Yazıcı desteği" OFF \
+"base-devel" "Derleme araçları" ON \
+"flatpak" "Flatpak desteği" OFF \
+"pipewire" "Ses sistemi" ON \
+3>&1 1>&2 2>&3)
+EXTRAPKGS=$(echo $EXTRAPKGS | sed 's/"//g')
 
-# ------------------------------------------------------------
-# 7. Chroot Ortamı
-# ------------------------------------------------------------
-arch-chroot /mnt /bin/bash <<EOF
-set -euo pipefail
+echo 15; echo "Disk bölümlendirme..."
+parted -s "$DISK" mklabel gpt >>"$LOGFILE" 2>&1
+parted -s "$DISK" mkpart ESP fat32 1MiB 512MiB >>"$LOGFILE" 2>&1
+parted -s "$DISK" set 1 boot on >>"$LOGFILE" 2>&1
+parted -s "$DISK" mkpart primary 512MiB 100% >>"$LOGFILE" 2>&1
 
-# Locale
-sed -i "s/^#\($LOCALE UTF-8\)/\1/" /etc/locale.gen
-locale-gen
-echo "LANG=$LOCALE" > /etc/locale.conf
+BOOTPART=$(ls "${DISK}"* | grep -E "${DISK}p?1$")
+ROOTPART=$(ls "${DISK}"* | grep -E "${DISK}p?2$")
 
-# Timezone
-ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
-hwclock --systohc
+mkfs.fat -F32 "$BOOTPART"
+mkfs.ext4 -F "$ROOTPART"
 
-# Keymap
-echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+echo 25; echo "Disk mount ediliyor..."
+mount "$ROOTPART" /mnt
+mkdir -p /mnt/boot
+mount "$BOOTPART" /mnt/boot
 
-# User
-useradd -m -G wheel -s /bin/bash "$USERNAME"
-echo "$USERNAME:$USERPASS" | chpasswd
-echo "root:$ROOTPASS" | chpasswd
-echo "%wheel ALL=(ALL) ALL" >> /etc/sudoers
+echo 40; echo "Mirror listesi güncelleniyor..."
+pacman -Sy --noconfirm
 
-# Desktop Environment
-case $DE in
-  gnome) pacman -S --noconfirm gnome gdm; systemctl enable gdm ;;
-  kde) pacman -S --noconfirm plasma kde-applications sddm; systemctl enable sddm ;;
-  xfce4) pacman -S --noconfirm xfce4 xfce4-goodies lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
-  cinnamon) pacman -S --noconfirm cinnamon lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
-  mate) pacman -S --noconfirm mate mate-extra lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
-  lxqt) pacman -S --noconfirm lxqt openbox sddm; systemctl enable sddm ;;
-  deepin) pacman -S --noconfirm deepin deepin-extra lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
-  sway) pacman -S --noconfirm sway ;;
-  river)
-    pacman -S --noconfirm go rust git base-devel greetd
-    cd /opt
-    git clone https://aur.archlinux.org/yay.git
-    chown -R $USERNAME:$USERNAME yay
-    cd yay
-    sudo -u $USERNAME makepkg -si --noconfirm
-    sudo -u $USERNAME yay -S --noconfirm river
-    echo "[greeter]" > /etc/greetd/config.toml
-    echo "command = river" >> /etc/greetd/config.toml
-    systemctl enable greetd
-    ;;
+case "$DESKTOP" in
+  enlightenment) DESKTOP_PKGS="enlightenment lightdm lightdm-gtk-greeter"; DM_ENABLE="systemctl enable lightdm";;
+  hyprland) DESKTOP_PKGS="hyprland xorg-xwayland waybar rofi alacritty greetd"; DM_ENABLE="systemctl enable greetd";;
+  gnome) DESKTOP_PKGS="gnome gdm"; DM_ENABLE="systemctl enable gdm";;
+  kde) DESKTOP_PKGS="plasma kde-applications sddm"; DM_ENABLE="systemctl enable sddm";;
+  xfce) DESKTOP_PKGS="xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_ENABLE="systemctl enable lightdm";;
+  lxqt) DESKTOP_PKGS="lxqt lightdm lightdm-gtk-greeter"; DM_ENABLE="systemctl enable lightdm";;
 esac
 
-# Bootloader (systemd-boot)
-bootctl install
-echo "default arch.conf" > /boot/loader/loader.conf
-cat <<CONF > /boot/loader/entries/arch.conf
-title   Arch Linux
-linux   /vmlinuz-linux
-initrd  /initramfs-linux.img
-options root=$ROOTPART rw
-CONF
-EOF
+echo 55; echo "Temel sistem kuruluyor..."
+pacstrap /mnt base linux linux-firmware $DESKTOP_PKGS $EXTRAPKGS nano sudo vim git unzip plymouth systemd networkmanager network-manager-applet
 
-# ------------------------------------------------------------
-# 8. Son Mesaj ve Reboot
-# ------------------------------------------------------------
-whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux başarıyla kuruldu." 10 60
-clear
-if whiptail --yesno "Sistemi yeniden başlatmak ister misiniz?" 10 60; then
-  reboot
-fi
+echo 70; echo "fstab oluşturuluyor..."
+genfstab -U /mnt >> /mnt/etc/fstab
+
+echo 85; echo "Chroot işlemleri..."
+arch-chroot /mnt bash -c "
+bootctl install
+
+# Locale
+if grep -q \"^#${LOCALE}\" /etc/locale.gen; then
+  sed -i \"s/^#${LOCALE}/${LOCALE}/\" /etc/locale.gen
+elif ! grep -q
