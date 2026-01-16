@@ -8,8 +8,9 @@ exec > >(tee -a $LOGFILE) 2>&1
 # ------------------------------------------------------------
 # 1. Disk Seçimi ve Bölümler
 # ------------------------------------------------------------
-DISK=$(lsblk -d -n -o NAME | awk '{print "/dev/"$1" /dev/"$1}' | \
-whiptail --title "Disk Seçimi" --menu "Kurulum yapılacak diski seçin:" 20 70 10 \
+DISK=$(lsblk -d -n -o NAME | while read name; do
+  echo "/dev/$name" "$name"
+done | whiptail --title "Disk Seçimi" --menu "Kurulum yapılacak diski seçin:" 20 70 10 \
 3>&1 1>&2 2>&3)
 
 if [[ $DISK == *"nvme"* ]]; then
@@ -121,8 +122,8 @@ case $DE in
     cd yay
     sudo -u $USERNAME makepkg -si --noconfirm
     sudo -u $USERNAME yay -S --noconfirm river
-    # greetd ayarı
-    echo "[greeter]\ncommand = river" > /etc/greetd/config.toml
+    echo "[greeter]" > /etc/greetd/config.toml
+    echo "command = river" >> /etc/greetd/config.toml
     systemctl enable greetd
     ;;
 esac
