@@ -6,67 +6,40 @@ LOGFILE="/root/kurulum.log"
 exec > >(tee -a $LOGFILE) 2>&1
 
 # ------------------------------------------------------------
-# 1. Disk Seçimi (dinamik liste)
+# 1. Disk ve Bölümler (otomatik nvme0n1)
 # ------------------------------------------------------------
-DISK=$(whiptail --title "Disk Seçimi" --menu "Kurulum yapılacak diski seçin:" 20 70 10 \
-$(lsblk -d -n -o NAME,SIZE | awk '{print $1 " " $2}') \
-3>&1 1>&2 2>&3)
+DISK="nvme0n1"
+BOOTPART="${DISK}p1"
+ROOTPART="${DISK}p2"
 
-if [ -z "$DISK" ]; then
-  whiptail --title "Hata" --msgbox "Disk seçilmedi, kurulum iptal edildi." 10 60
-  exit 1
-fi
+# Biçimlendirme (isteğe bağlı, mevcut veriler silinir!)
+mkfs.fat -F32 /dev/$BOOTPART
+mkfs.ext4 /dev/$ROOTPART
 
-# ------------------------------------------------------------
-# 2. Disk Bölümlendirme ve Biçimlendirme (progress bar)
-# ------------------------------------------------------------
-(
-echo 10; parted --script /dev/$DISK mklabel gpt
-echo 30; parted --script /dev/$DISK mkpart ESP fat32 1MiB 513MiB
-echo 50; parted --script /dev/$DISK set 1 boot on
-echo 70; parted --script /dev/$DISK mkpart primary ext4 513MiB 100%
-echo 80; mkfs.fat -F32 /dev/${DISK}1
-echo 90; mkfs.ext4 /dev/${DISK}2
-echo 100
-) | whiptail --gauge "Disk bölümleniyor ve biçimlendiriliyor..." 6 60 0
-
-mount /dev/${DISK}2 /mnt
+# Mount işlemleri
+mount /dev/$ROOTPART /mnt
 mkdir -p /mnt/boot
-mount /dev/${DISK}1 /mnt/boot
+mount /dev/$BOOTPART /mnt/boot
 
 # ------------------------------------------------------------
-# 3. Ağ Ayarları
+# 2. Ağ Ayarları (sadece ethernet varsayılan)
 # ------------------------------------------------------------
-NETTYPE=$(whiptail --title "Ağ Bağlantısı" --menu "Bağlantı türünü seçin:" 15 60 5 \
-"wifi" "Kablosuz (Wi-Fi)" \
-"ethernet" "Kablolu (Ethernet)" \
-3>&1 1>&2 2>&3)
-
-if [ "$NETTYPE" = "wifi" ]; then
-  SSID=$(whiptail --title "Wi-Fi SSID" --inputbox "Wi-Fi ağ adını girin:" 10 60 3>&1 1>&2 2>&3)
-  WIFIPASS=$(whiptail --title "Wi-Fi Şifresi" --passwordbox "$SSID için şifre:" 10 60 3>&1 1>&2 2>&3)
-  pacman -Sy --noconfirm networkmanager
-  systemctl enable NetworkManager
-  systemctl start NetworkManager
-  nmcli dev wifi connect "$SSID" password "$WIFIPASS"
-else
-  ETHDEV=$(ip link | awk -F: '/state UP|state DOWN/ && $2 ~ /en/ {print $2; exit}' | tr -d ' ')
-  pacman -Sy --noconfirm networkmanager
-  systemctl enable NetworkManager
-  systemctl start NetworkManager
-  nmcli dev set "$ETHDEV" managed yes
-  nmcli con add type ethernet ifname "$ETHDEV" con-name "wired" autoconnect yes
-fi
+pacman -Sy --noconfirm networkmanager
+systemctl enable NetworkManager
+systemctl start NetworkManager
+ETHDEV=$(ip link | awk -F: '/state UP|state DOWN/ && $2 ~ /en/ {print $2; exit}' | tr -d ' ')
+nmcli dev set "$ETHDEV" managed yes
+nmcli con add type ethernet ifname "$ETHDEV" con-name "wired" autoconnect yes
 
 # ------------------------------------------------------------
-# 4. Kullanıcı
+# 3. Kullanıcı
 # ------------------------------------------------------------
 USERNAME=$(whiptail --title "Kullanıcı Adı" --inputbox "Yeni kullanıcı adı:" 10 60 3>&1 1>&2 2>&3)
 USERPASS=$(whiptail --title "Kullanıcı Şifresi" --passwordbox "$USERNAME için şifre:" 10 60 3>&1 1>&2 2>&3)
 ROOTPASS=$(whiptail --title "Root Şifresi" --passwordbox "Root için şifre:" 10 60 3>&1 1>&2 2>&3)
 
 # ------------------------------------------------------------
-# 5. Dil, Zaman Dilimi, Klavye
+# 4. Dil, Zaman Dilimi, Klavye
 # ------------------------------------------------------------
 LOCALE=$(whiptail --title "Dil Seçimi" --menu "Dil seçin:" 20 70 10 \
 $(grep -E "UTF-8" /etc/locale.gen | sed 's/#//g' | awk '{print $1 " " $1}') \
@@ -81,7 +54,7 @@ $(localectl list-keymaps | awk '{print $1 " " $1}') \
 3>&1 1>&2 2>&3)
 
 # ------------------------------------------------------------
-# 6. Masaüstü Ortamı
+# 5. Masaüstü Ortamı
 # ------------------------------------------------------------
 DE=$(whiptail --title "Masaüstü Ortamı" --menu "Masaüstü ortamı seçin:" 20 70 12 \
 "gnome" "GNOME" \
@@ -95,13 +68,13 @@ DE=$(whiptail --title "Masaüstü Ortamı" --menu "Masaüstü ortamı seçin:" 2
 3>&1 1>&2 2>&3)
 
 # ------------------------------------------------------------
-# 7. Temel Sistem Kurulumu
+# 6. Temel Sistem Kurulumu
 # ------------------------------------------------------------
 pacstrap /mnt base linux linux-firmware vim networkmanager git base-devel
 genfstab -U /mnt >> /mnt/etc/fstab
 
 # ------------------------------------------------------------
-# 8. Chroot Ortamı
+# 7. Chroot Ortamı
 # ------------------------------------------------------------
 arch-chroot /mnt /bin/bash <<EOF
 set -euo pipefail
@@ -143,7 +116,7 @@ grub-mkconfig -o /boot/grub/grub.cfg
 EOF
 
 # ------------------------------------------------------------
-# 9. Son Mesaj ve Reboot
+# 8. Son Mesaj ve Reboot
 # ------------------------------------------------------------
 whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux başarıyla kuruldu." 10 60
 clear
