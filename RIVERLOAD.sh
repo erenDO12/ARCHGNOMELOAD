@@ -26,19 +26,43 @@ mkdir /mnt/boot
 mount /dev/${DISK}1 /mnt/boot
 
 # ------------------------------------------------------------
-# 2. Temel Sistem Kurulumu
+# 2. Ağ Ayarları
+# ------------------------------------------------------------
+NETTYPE=$(whiptail --title "Ağ Bağlantısı" --menu "Bağlantı türünü seçin:" 15 60 5 \
+"wifi" "Kablosuz (Wi-Fi)" \
+"ethernet" "Kablolu (Ethernet)" \
+3>&1 1>&2 2>&3)
+
+if [ "$NETTYPE" = "wifi" ]; then
+  SSID=$(whiptail --title "Wi-Fi SSID" --inputbox "Bağlanmak istediğiniz Wi-Fi ağ adını girin:" 10 60 3>&1 1>&2 2>&3)
+  WIFIPASS=$(whiptail --title "Wi-Fi Şifresi" --passwordbox "$SSID için şifre girin:" 10 60 3>&1 1>&2 2>&3)
+  pacman -Sy --noconfirm networkmanager
+  systemctl enable NetworkManager
+  systemctl start NetworkManager
+  nmcli dev wifi connect "$SSID" password "$WIFIPASS"
+elif [ "$NETTYPE" = "ethernet" ]; then
+  ETHDEV=$(ip link | awk -F: '/state UP|state DOWN/ && $2 ~ /en/ {print $2; exit}' | tr -d ' ')
+  pacman -Sy --noconfirm networkmanager
+  systemctl enable NetworkManager
+  systemctl start NetworkManager
+  nmcli dev set "$ETHDEV" managed yes
+  nmcli con add type ethernet ifname "$ETHDEV" con-name "wired" autoconnect yes
+fi
+
+# ------------------------------------------------------------
+# 3. Temel Sistem Kurulumu
 # ------------------------------------------------------------
 whiptail --title "Temel Sistem Kurulumu" --msgbox "Arch Linux temel paketleri kuruluyor..." 10 60
 pacstrap /mnt base linux linux-firmware vim networkmanager git base-devel
 
 # ------------------------------------------------------------
-# 3. fstab Oluşturma
+# 4. fstab Oluşturma
 # ------------------------------------------------------------
 whiptail --title "fstab" --msgbox "Disk bölümleri fstab dosyasına yazılıyor..." 10 60
 genfstab -U /mnt >> /mnt/etc/fstab
 
 # ------------------------------------------------------------
-# 4. Chroot Ortamı ve Sistem Ayarları
+# 5. Chroot Ortamı ve Sistem Ayarları
 # ------------------------------------------------------------
 arch-chroot /mnt /bin/bash <<EOF
 
