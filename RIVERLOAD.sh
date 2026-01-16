@@ -6,33 +6,38 @@ LOGFILE="/root/kurulum.log"
 exec > >(tee -a $LOGFILE) 2>&1
 
 # ------------------------------------------------------------
-# 1. Disk ve Bölümler (otomatik nvme0n1)
+# 1. Disk Seçimi ve Bölümler
 # ------------------------------------------------------------
-DISK="nvme0n1"
-BOOTPART="${DISK}p1"
-ROOTPART="${DISK}p2"
+DISK=$(lsblk -d -n -o NAME | awk '{print "/dev/"$1" /dev/"$1}' | \
+whiptail --title "Disk Seçimi" --menu "Kurulum yapılacak diski seçin:" 20 70 10 \
+3>&1 1>&2 2>&3)
 
-# Biçimlendirme (isteğe bağlı, mevcut veriler silinir!)
-mkfs.fat -F32 /dev/$BOOTPART
-mkfs.ext4 /dev/$ROOTPART
+if [[ $DISK == *"nvme"* ]]; then
+  BOOTPART="${DISK}p1"
+  ROOTPART="${DISK}p2"
+else
+  BOOTPART="${DISK}1"
+  ROOTPART="${DISK}2"
+fi
 
-# Mount işlemleri
-mount /dev/$ROOTPART /mnt
+mkfs.fat -F32 $BOOTPART
+mkfs.ext4 $ROOTPART
+
+mount $ROOTPART /mnt
 mkdir -p /mnt/boot
-mount /dev/$BOOTPART /mnt/boot
+mount $BOOTPART /mnt/boot
 
 # ------------------------------------------------------------
-# 2. Ağ Ayarları (sadece ethernet varsayılan)
+# 2. Ağ Ayarları
 # ------------------------------------------------------------
-pacman -Sy --noconfirm networkmanager
+pacman -Sy --noconfirm networkmanager dialog
 systemctl enable NetworkManager
-systemctl start NetworkManager
+
 ETHDEV=$(ip link | awk -F: '/state UP|state DOWN/ && $2 ~ /en/ {print $2; exit}' | tr -d ' ')
-nmcli dev set "$ETHDEV" managed yes
-nmcli con add type ethernet ifname "$ETHDEV" con-name "wired" autoconnect yes
+NETNAME=$(whiptail --title "Ağ Bağlantısı" --inputbox "Bağlantı adı:" 10 60 "$ETHDEV" 3>&1 1>&2 2>&3)
 
 # ------------------------------------------------------------
-# 3. Kullanıcı
+# 3. Kullanıcı Bilgileri
 # ------------------------------------------------------------
 USERNAME=$(whiptail --title "Kullanıcı Adı" --inputbox "Yeni kullanıcı adı:" 10 60 3>&1 1>&2 2>&3)
 USERPASS=$(whiptail --title "Kullanıcı Şifresi" --passwordbox "$USERNAME için şifre:" 10 60 3>&1 1>&2 2>&3)
@@ -65,6 +70,7 @@ DE=$(whiptail --title "Masaüstü Ortamı" --menu "Masaüstü ortamı seçin:" 2
 "lxqt" "LXQt" \
 "deepin" "Deepin" \
 "sway" "Sway (Wayland)" \
+"river" "River (Wayland, AUR)" \
 3>&1 1>&2 2>&3)
 
 # ------------------------------------------------------------
@@ -107,12 +113,29 @@ case $DE in
   lxqt) pacman -S --noconfirm lxqt openbox sddm; systemctl enable sddm ;;
   deepin) pacman -S --noconfirm deepin deepin-extra lightdm lightdm-gtk-greeter; systemctl enable lightdm ;;
   sway) pacman -S --noconfirm sway ;;
+  river)
+    pacman -S --noconfirm go rust git base-devel greetd
+    cd /opt
+    git clone https://aur.archlinux.org/yay.git
+    chown -R $USERNAME:$USERNAME yay
+    cd yay
+    sudo -u $USERNAME makepkg -si --noconfirm
+    sudo -u $USERNAME yay -S --noconfirm river
+    # greetd ayarı
+    echo "[greeter]\ncommand = river" > /etc/greetd/config.toml
+    systemctl enable greetd
+    ;;
 esac
 
-# Bootloader
-pacman -S --noconfirm grub efibootmgr
-grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
-grub-mkconfig -o /boot/grub/grub.cfg
+# Bootloader (systemd-boot)
+bootctl install
+echo "default arch.conf" > /boot/loader/loader.conf
+cat <<CONF > /boot/loader/entries/arch.conf
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options root=$ROOTPART rw
+CONF
 EOF
 
 # ------------------------------------------------------------
