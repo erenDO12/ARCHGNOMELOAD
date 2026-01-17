@@ -197,4 +197,4 @@ clear
 
 if whiptail --yesno "Sistemi yeniden başlatmak ister misiniz?" 10 60; then
   reboot
-fi root şifresi
+fi
