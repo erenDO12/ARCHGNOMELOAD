@@ -1,3 +1,188 @@
+
+
+
+
+
+Bugün
+Şunu dediniz:
+Arch Linux net install ISO ya sıfırdan parted system d ile Gnome kurulumunu göster
+Copilot şunu dedi:
+Harika bir konu seçtin ⚡. Arch Linux’u netinstall ISO üzerinden sıfırdan kurmak, özellikle parted ile disk bölümlendirme ve systemd init sistemiyle GNOME masaüstünü kurmak, hem öğretici hem de pratik bir süreçtir. Sana adım adım bir rehber hazırladım:
+
+🖥️ 1. ISO ile Boot Et
+Arch Linux netinstall ISO’yu indirip USB’ye yaz.
+
+BIOS/UEFI’den USB ile boot et.
+
+İnternete bağlan (iwctl veya ip link ile kontrol et).
+
+💽 2. Disk Bölümlendirme (parted)
+Örnek: tek disk /dev/sda
+
+bash
+
+
+Kopyala
+parted /dev/sda
+mklabel gpt
+mkpart ESP fat32 1MiB 512MiB
+set 1 boot on
+mkpart primary ext4 512MiB 100%
+quit
+ESP (EFI System Partition): 512 MB, FAT32
+
+Root: kalan alan, ext4
+
+Formatla:
+
+bash
+
+
+Kopyala
+mkfs.fat -F32 /dev/sda1
+mkfs.ext4 /dev/sda2
+Mount et:
+
+bash
+
+
+Kopyala
+mount /dev/sda2 /mnt
+mkdir /mnt/boot
+mount /dev/sda1 /mnt/boot
+📦 3. Temel Sistem Kurulumu
+bash
+
+
+Kopyala
+pacstrap /mnt base linux linux-firmware vim nano networkmanager systemd
+📂 4. Fstab ve Chroot
+bash
+
+
+Kopyala
+genfstab -U /mnt >> /mnt/etc/fstab
+arch-chroot /mnt
+⚙️ 5. Sistem Ayarları
+Hostname:
+
+bash
+
+
+Kopyala
+echo archpc > /etc/hostname
+Locales:
+
+bash
+
+
+Kopyala
+echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+Saat:
+
+bash
+
+
+Kopyala
+ln -sf /usr/share/zoneinfo/Europe/Istanbul /etc/localtime
+hwclock --systohc
+🔑 6. Bootloader (systemd-boot)
+bash
+
+
+Kopyala
+bootctl install
+/boot/loader/entries/arch.conf:
+
+Kod
+
+
+Kopyala
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options root=/dev/sda2 rw
+🖥️ 7. GNOME Kurulumu
+bash
+
+
+Kopyala
+pacman -S gnome gnome-extra gdm
+systemctl enable gdm
+systemctl enable NetworkManager
+🚀 8. Çıkış ve Yeniden Başlat
+bash
+
+
+Kopyala
+exit
+umount -R /mnt
+reboot
+✨ Artık Arch Linux, systemd init sistemiyle GNOME masaüstü ortamında açılacak.
+
+İstersen sana bu adımların görsel bir akış diyagramını da hazırlayabilirim; kurulum sürecini daha net görürsün. İstiyor musun?
+
+
+
+
+
+
+Şunu dediniz:
+Kullanıcı eklemedim
+Copilot şunu dedi:
+Doğru, kullanıcı eklemeden sistem açılırsa sadece root hesabın olur. Bu güvenlik açısından riskli, çünkü günlük kullanımda root ile çalışmak önerilmez. Hemen yeni bir kullanıcı oluşturup ona sudo yetkisi vermelisin. İşte adımlar:
+
+👤 1. Yeni Kullanıcı Oluştur
+Örnek: kullanıcı adı ali
+
+bash
+
+
+Kopyala
+useradd -m -G wheel -s /bin/bash ali
+passwd ali
+-m → home dizini oluşturur (/home/ali)
+
+-G wheel → sudo yetkisi için gerekli gruba ekler
+
+-s /bin/bash → varsayılan shell olarak bash ayarlar
+
+🔑 2. Sudo Yetkisi Ver
+visudo ile sudoers dosyasını aç:
+
+bash
+
+
+Kopyala
+EDITOR=nano visudo
+Şu satırı aktif et:
+
+Kod
+
+
+Kopyala
+%wheel ALL=(ALL:ALL) ALL
+Kaydedip çık.
+
+🚀 3. Root’tan Çıkış ve Kullanıcıya Geçiş
+bash
+
+
+Kopyala
+exit
+login ali
+Artık GNOME’u bu kullanıcı ile açabilirsin. Root sadece sistem yönetimi için kullanılmalı.
+
+👉 İstersen sana GNOME oturum açılışında otomatik olarak bu kullanıcıyla giriş yapmayı da gösterebilirim. İlgini çeker mi?
+
+
+
+
+
+
+Şunu dediniz:
 #!/bin/bash
 set -euo pipefail
 
@@ -115,29 +300,30 @@ echo 70; echo "fstab oluşturuluyor..."
 genfstab -U /mnt >> /mnt/etc/fstab
 
 echo 85; echo "Chroot işlemleri..."
-arch-chroot /mnt /bin/bash <<EOF
+arch-chroot /mnt bash -c "
 bootctl install
 
 # Locale
-if grep -q "^#${LOCALE}" /etc/locale.gen; then
-  sed -i "s/^#${LOCALE}/${LOCALE} UTF-8/" /etc/locale.gen
-elif ! grep -q "^${LOCALE}" /etc/locale.gen; then
-  echo "${LOCALE} UTF-8" >> /etc/locale.gen
+if grep -q \"^#${LOCALE}\" /etc/locale.gen; then
+  sed -i \"s/^#${LOCALE}/${LOCALE}/\" /etc/locale.gen
+elif ! grep -q \"^${LOCALE}\" /etc/locale.gen; then
+  echo \"${LOCALE}\" >> /etc/locale.gen
 fi
-echo "LANG=${LOCALE}" > /etc/locale.conf
+echo \"LANG=${LOCALE}\" > /etc/locale.conf
 locale-gen
 
 # Hostname
-echo "${HOSTNAME}" > /etc/hostname
+echo \"${HOSTNAME}\" > /etc/hostname
 
 # Timezone
 ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
 hwclock --systohc
-# Keyboard
-echo "KEYMAP=${KEYMAP}" > /etc/vconsole.conf
-localectl set-x11-keymap ${KEYMAP} || true
 
-# Bootloader ayarları
+# Keyboard
+echo \"KEYMAP=${KEYMAP}\" > /etc/vconsole.conf
+localectl set-x11-keymap ${KEYMAP}
+
+# Bootloader
 cat > /boot/loader/loader.conf <<EOL
 default arch
 timeout 3
@@ -145,20 +331,20 @@ console-mode keep
 editor no
 EOL
 
-ROOTUUID=$(blkid -s UUID -o value ${ROOTPART})
+ROOTUUID=\$(blkid -s UUID -o value ${ROOTPART})
 cat > /boot/loader/entries/arch.conf <<EOL
 title   Arch Linux
 linux   /vmlinuz-linux
 initrd  /initramfs-linux.img
-options root=UUID=${ROOTUUID} rw quiet splash
+options root=UUID=\${ROOTUUID} rw quiet splash
 EOL
 
 # Ağ yapılandırması
-if [[ "${NETTYPE}" == "dhcp" ]]; then
+if [[ \"${NETTYPE}\" == \"dhcp\" ]]; then
   systemctl enable NetworkManager
 fi
 
-if [[ "${NETTYPE}" == "static" ]]; then
+if [[ \"${NETTYPE}\" == \"static\" ]]; then
   mkdir -p /etc/systemd/network
   cat > /etc/systemd/network/20-wired.network <<EOL
 [Match]
@@ -185,10 +371,10 @@ echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
 useradd -m -G wheel -s /bin/bash ${NEWUSER}
 echo "${NEWUSER}:${USERPASS}" | chpasswd
 echo "root:${ROOTPASS}" | chpasswd
-EOF
+"
 
 echo 100; echo "Kurulum tamamlandı!"
-) | tee -a $LOGFILE | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
+) | whiptail --gauge "Kurulum devam ediyor, lütfen bekleyin..." 20 70 0
 
 umount -R /mnt
 whiptail --title "$TITLE" --msgbox "Kurulum tamamlandı! Arch Linux GNOME hazır.\nLog: $LOGFILE" 10 70
@@ -196,4 +382,4 @@ clear
 
 if whiptail --yesno "Sistemi yeniden başlatmak ister misiniz?" 10 60; then
   reboot
-fi
+fi 
